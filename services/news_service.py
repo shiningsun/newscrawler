@@ -22,7 +22,8 @@ class NewsService:
         domains: Optional[str] = None,
         published_after: Optional[str] = None,
         extract: bool = True,
-        sources: Optional[str] = None
+        sources: Optional[str] = None,
+        limit: int = 10
     ) -> Dict:
         try:
             if published_after is None:
@@ -43,9 +44,9 @@ class NewsService:
             for source in selected_sources:
                 fetch_func = self.source_strategies[source]
                 if source == "thenewsapi":
-                    articles, meta_info = fetch_func(categories, language, search, domains, published_after)
+                    articles, meta_info = fetch_func(categories, language, search, domains, published_after, limit)
                 else:
-                    articles, meta_info = fetch_func(language, search, published_after)
+                    articles, meta_info = fetch_func(language, search, published_after, limit)
                 news_articles.extend(articles)
                 meta[source] = meta_info
 

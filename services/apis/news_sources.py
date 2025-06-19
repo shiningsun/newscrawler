@@ -2,12 +2,13 @@ import requests
 from datetime import datetime
 from config import THENEWSAPI_TOKEN, GNEWS_API_KEY, NYTIMES_API_KEY
 
-def fetch_thenewsapi_articles(categories=None, language="en", search=None, domains=None, published_after=None):
+def fetch_thenewsapi_articles(categories=None, language="en", search=None, domains=None, published_after=None, limit=10):
     url = "https://api.thenewsapi.com/v1/news/top"
     params = {
         "api_token": THENEWSAPI_TOKEN,
         "language": language,
-        "published_after": published_after
+        "published_after": published_after,
+        "limit": limit
     }
     if categories:
         params["categories"] = categories
@@ -18,18 +19,18 @@ def fetch_thenewsapi_articles(categories=None, language="en", search=None, domai
     response = requests.get(url, params=params)
     response.raise_for_status()
     data = response.json()
-    articles = data.get("data", [])
+    articles = data.get("data", [])[:limit]  # Ensure we don't exceed limit
     for article in articles:
         article['source_api'] = 'thenewsapi'
     return articles, data.get("meta", {})
 
-def fetch_gnews_articles(language="en", search=None, published_after=None):
+def fetch_gnews_articles(language="en", search=None, published_after=None, limit=10):
     url = "https://gnews.io/api/v4/search"
     params = {
         "apikey": GNEWS_API_KEY,
         "lang": language,
         "country": "us",
-        "max": 10
+        "max": limit
     }
     if search:
         # If search is a comma-separated list or multiple words, join with ' AND '
@@ -52,7 +53,7 @@ def fetch_gnews_articles(language="en", search=None, published_after=None):
     response = requests.get(url, params=params)
     response.raise_for_status()
     data = response.json()
-    articles = data.get("articles", [])
+    articles = data.get("articles", [])[:limit]  # Ensure we don't exceed limit
     transformed = []
     for article in articles:
         transformed_article = {
@@ -70,11 +71,12 @@ def fetch_gnews_articles(language="en", search=None, published_after=None):
         transformed.append(transformed_article)
     return transformed, {"totalArticles": data.get("totalArticles", 0), "articles": len(articles)}
 
-def fetch_nytimes_articles(language="en", search=None, published_after=None):
+def fetch_nytimes_articles(language="en", search=None, published_after=None, limit=10):
     url = "https://api.nytimes.com/svc/search/v2/articlesearch.json"
     params = {
         "api-key": NYTIMES_API_KEY,
-        "sort": "newest"
+        "sort": "newest",
+        "page-size": limit
     }
     if search:
         params["q"] = search
@@ -87,7 +89,7 @@ def fetch_nytimes_articles(language="en", search=None, published_after=None):
     response = requests.get(url, params=params)
     response.raise_for_status()
     data = response.json()
-    articles = data.get("response", {}).get("docs", [])
+    articles = data.get("response", {}).get("docs", [])[:limit]  # Ensure we don't exceed limit
     transformed = []
     for article in articles:
         multimedia = article.get('multimedia', [])
@@ -112,12 +114,12 @@ def fetch_nytimes_articles(language="en", search=None, published_after=None):
         transformed.append(transformed_article)
     return transformed, {"totalArticles": len(articles)}
 
-def fetch_guardian_articles(language="en", search=None, published_after=None):
+def fetch_guardian_articles(language="en", search=None, published_after=None, limit=10):
     url = "https://content.guardianapis.com/search"
     params = {
         "api-key": "aa186ad1-74c3-4a98-a447-dd90aa6afbc3",
         "order-by": "newest",
-        "page-size": 10,
+        "page-size": limit,
         "show-fields": "trailText,headline,byline,thumbnail,bodyText,publication"
     }
     if search:
@@ -132,7 +134,7 @@ def fetch_guardian_articles(language="en", search=None, published_after=None):
     response = requests.get(url, params=params)
     response.raise_for_status()
     data = response.json()
-    results = data.get("response", {}).get("results", [])
+    results = data.get("response", {}).get("results", [])[:limit]  # Ensure we don't exceed limit
     articles = []
     for article in results:
         fields = article.get("fields", {})

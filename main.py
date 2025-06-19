@@ -45,7 +45,8 @@ async def get_news(
     domains: Optional[str] = Query(None, description="Comma-separated list of domains to filter by"),
     published_after: str = Query(default=None, description="Filter articles published after this date (YYYY-MM-DD format, default: yesterday)"),
     extract: bool = Query(True, description="Extract article content (default: true)"),
-    sources: Optional[str] = Query(None, description="Comma-separated list of sources to use: thenewsapi,gnews,nytimes,guardian (default: all)")
+    sources: Optional[str] = Query(None, description="Comma-separated list of sources to use: thenewsapi,gnews,nytimes,guardian (default: all)"),
+    limit: int = Query(10, description="Maximum number of articles to fetch from each source (default: 10)")
 ) -> Dict:
     """
     Fetch news articles from selected sources (TheNewsAPI, GNews, NYTimes, Guardian).
@@ -58,7 +59,8 @@ async def get_news(
             domains=domains,
             published_after=published_after,
             extract=extract,
-            sources=sources
+            sources=sources,
+            limit=limit
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

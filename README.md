@@ -50,6 +50,7 @@ The service will be available at `http://localhost:8000`
 - `published_after`: Filter articles published after this date (YYYY-MM-DD format, default: yesterday)
 - `extract`: Extract article content (default: true)
 - `sources`: Comma-separated list of sources to use (`thenewsapi`, `gnews`, `nytimes`, `guardian`). Example: `sources=thenewsapi,gnews,guardian`. If omitted, all sources are used by default.
+- `limit`: Maximum number of articles to fetch from each source (default: 10)
 
 ## Search Logic for GNews
 - If you provide multiple search terms (comma-separated or space-separated), they will be joined with ' AND ' for more precise results. For example:
@@ -80,6 +81,9 @@ The service will be available at `http://localhost:8000`
 # Get all recent news from all sources
 GET http://localhost:8000/news
 
+# Get 5 articles from each source
+GET http://localhost:8000/news?limit=5
+
 # Only get news from TheNewsAPI, GNews, and Guardian
 GET http://localhost:8000/news?sources=thenewsapi,gnews,guardian
 
@@ -101,4 +105,7 @@ GET http://localhost:8000/news?published_after=2025-06-01
 
 # Disable content extraction for faster response
 GET http://localhost:8000/news?extract=false
+
+# Get 3 articles from NYTimes and Guardian
+GET http://localhost:8000/news?sources=nytimes,guardian&limit=3
 ``` 
