@@ -49,11 +49,16 @@ The service will be available at `http://localhost:8000`
 - `domains`: Comma-separated list of domains to filter by
 - `published_after`: Filter articles published after this date (YYYY-MM-DD format, default: yesterday)
 - `extract`: Extract article content (default: true)
-- `sources`: Comma-separated list of sources to use (`thenewsapi`, `gnews`, `nytimes`). Example: `sources=thenewsapi,gnews`. If omitted, all sources are used by default.
+- `sources`: Comma-separated list of sources to use (`thenewsapi`, `gnews`, `nytimes`, `guardian`). Example: `sources=thenewsapi,gnews,guardian`. If omitted, all sources are used by default.
+
+## Search Logic for GNews
+- If you provide multiple search terms (comma-separated or space-separated), they will be joined with ' AND ' for more precise results. For example:
+  - `search=china,iran` → `q=china AND iran`
+  - `search=climate change` → `q=climate AND change`
 
 ## Features
 
-- **Multi-API Integration**: Fetches news from TheNewsAPI, GNews, and NYTimes
+- **Multi-API Integration**: Fetches news from TheNewsAPI, GNews, NYTimes, and The Guardian
 - **Source Toggling**: Select which APIs to use via the `sources` parameter
 - **Content Extraction**: Automatically extracts full article content from URLs
 - **Multiple Filters**: Search, categories, domains, language, and date filtering
@@ -75,14 +80,18 @@ The service will be available at `http://localhost:8000`
 # Get all recent news from all sources
 GET http://localhost:8000/news
 
-# Only get news from TheNewsAPI and GNews
-GET http://localhost:8000/news?sources=thenewsapi,gnews
+# Only get news from TheNewsAPI, GNews, and Guardian
+GET http://localhost:8000/news?sources=thenewsapi,gnews,guardian
 
 # Only get news from NYTimes
 GET http://localhost:8000/news?sources=nytimes
 
-# Search for specific topics from all sources
-GET http://localhost:8000/news?search=technology
+# Only get news from Guardian
+GET http://localhost:8000/news?sources=guardian
+
+# Search for multiple topics (GNews will join with AND)
+GET http://localhost:8000/news?search=china,iran
+GET http://localhost:8000/news?search=climate%20change
 
 # Filter by categories and domains
 GET http://localhost:8000/news?categories=business&domains=bbc.com

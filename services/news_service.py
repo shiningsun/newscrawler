@@ -1,6 +1,6 @@
 from typing import Optional, Dict, List
 from datetime import datetime, timedelta
-from services.apis.news_sources import fetch_thenewsapi_articles, fetch_gnews_articles, fetch_nytimes_articles
+from services.apis.news_sources import fetch_thenewsapi_articles, fetch_gnews_articles, fetch_nytimes_articles, fetch_guardian_articles
 from utils.article_extractor import extract_multiple_articles
 import requests
 
@@ -11,6 +11,7 @@ class NewsService:
             "thenewsapi": fetch_thenewsapi_articles,
             "gnews": fetch_gnews_articles,
             "nytimes": fetch_nytimes_articles,
+            "guardian": fetch_guardian_articles,
         }
 
     def get_news(

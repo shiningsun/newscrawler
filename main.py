@@ -5,9 +5,8 @@ from typing import Dict, List, Optional
 import requests
 from datetime import datetime, timedelta
 import json
-from article_extractor import extract_article_content, extract_multiple_articles
+from utils.article_extractor import extract_article_content, extract_multiple_articles
 from config import THENEWSAPI_TOKEN, GNEWS_API_KEY, NYTIMES_API_KEY, HOST, PORT
-from news_api import fetch_thenewsapi_articles, fetch_gnews_articles, fetch_nytimes_articles
 from services.news_service import NewsService
 
 app = FastAPI(
@@ -46,8 +45,11 @@ async def get_news(
     domains: Optional[str] = Query(None, description="Comma-separated list of domains to filter by"),
     published_after: str = Query(default=None, description="Filter articles published after this date (YYYY-MM-DD format, default: yesterday)"),
     extract: bool = Query(True, description="Extract article content (default: true)"),
-    sources: Optional[str] = Query(None, description="Comma-separated list of sources to use: thenewsapi,gnews,nytimes (default: all)")
+    sources: Optional[str] = Query(None, description="Comma-separated list of sources to use: thenewsapi,gnews,nytimes,guardian (default: all)")
 ) -> Dict:
+    """
+    Fetch news articles from selected sources (TheNewsAPI, GNews, NYTimes, Guardian).
+    """
     try:
         return news_service.get_news(
             categories=categories,

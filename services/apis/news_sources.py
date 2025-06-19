@@ -32,7 +32,15 @@ def fetch_gnews_articles(language="en", search=None, published_after=None):
         "max": 10
     }
     if search:
-        params["q"] = "newsweek AND " + search
+        # If search is a comma-separated list or multiple words, join with ' AND '
+        if ',' in search:
+            search_terms = [s.strip() for s in search.split(',') if s.strip()]
+            params["q"] = ' AND '.join(search_terms)
+        elif ' ' in search.strip():
+            search_terms = [s.strip() for s in search.strip().split() if s.strip()]
+            params["q"] = ' AND '.join(search_terms)
+        else:
+            params["q"] = search
     else:
         params["q"] = "newsweek"
     if published_after:
@@ -102,4 +110,48 @@ def fetch_nytimes_articles(language="en", search=None, published_after=None):
             'source_api': 'nytimes'
         }
         transformed.append(transformed_article)
-    return transformed, {"totalArticles": len(articles)} 
+    return transformed, {"totalArticles": len(articles)}
+
+def fetch_guardian_articles(language="en", search=None, published_after=None):
+    url = "https://content.guardianapis.com/search"
+    params = {
+        "api-key": "aa186ad1-74c3-4a98-a447-dd90aa6afbc3",
+        "order-by": "newest",
+        "page-size": 10,
+        "show-fields": "trailText,headline,byline,thumbnail,bodyText,publication"
+    }
+    if search:
+        params["q"] = search
+    if published_after:
+        try:
+            # Guardian expects YYYY-MM-DD or ISO8601
+            date_obj = datetime.strptime(published_after, "%Y-%m-%d")
+            params["from-date"] = date_obj.strftime("%Y-%m-%d")
+        except:
+            pass
+    response = requests.get(url, params=params)
+    response.raise_for_status()
+    data = response.json()
+    results = data.get("response", {}).get("results", [])
+    articles = []
+    for article in results:
+        fields = article.get("fields", {})
+        transformed_article = {
+            'uuid': article.get('id', ''),
+            'title': fields.get('headline', article.get('webTitle', '')),
+            'description': fields.get('trailText', ''),
+            'url': article.get('webUrl', ''),
+            'image_url': fields.get('thumbnail', ''),
+            'language': language,  # Guardian API does not provide language
+            'published_at': article.get('webPublicationDate', ''),
+            'source': 'theguardian.com',
+            'categories': [article.get('sectionName', 'general')],
+            'source_api': 'guardian'
+        }
+        articles.append(transformed_article)
+    meta = {
+        "total": data.get("response", {}).get("total", 0),
+        "pageSize": data.get("response", {}).get("pageSize", 0),
+        "currentPage": data.get("response", {}).get("currentPage", 0)
+    }
+    return articles, meta 
