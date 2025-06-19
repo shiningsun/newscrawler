@@ -6,7 +6,8 @@ import requests
 from datetime import datetime, timedelta
 import json
 from article_extractor import extract_article_content, extract_multiple_articles
-from config import THENEWSAPI_TOKEN, GNEWS_API_KEY, HOST, PORT
+from config import THENEWSAPI_TOKEN, GNEWS_API_KEY, NYTIMES_API_KEY, HOST, PORT
+from news_api import fetch_thenewsapi_articles, fetch_gnews_articles, fetch_nytimes_articles
 
 app = FastAPI(
     title="Python Service",
@@ -41,90 +42,43 @@ async def get_news(
     search: Optional[str] = Query(None, description="Search term to filter articles"),
     domains: Optional[str] = Query(None, description="Comma-separated list of domains to filter by"),
     published_after: str = Query(default=None, description="Filter articles published after this date (YYYY-MM-DD format, default: yesterday)"),
-    extract: bool = Query(True, description="Extract article content (default: true)")
+    extract: bool = Query(True, description="Extract article content (default: true)"),
+    sources: Optional[str] = Query(None, description="Comma-separated list of sources to use: thenewsapi,gnews,nytimes (default: all)")
 ) -> Dict:
     try:
-        # Set default published_after to yesterday if not provided
         if published_after is None:
             yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
             published_after = yesterday
-        
-        # First API call - TheNewsAPI
-        url1 = "https://api.thenewsapi.com/v1/news/top"
-        params1 = {
-            "api_token": THENEWSAPI_TOKEN,
-            "language": language,
-            "published_after": published_after
-        }
-        
-        # Add parameters to first API
-        if categories:
-            params1["categories"] = categories
-        if search:
-            params1["search"] = search
-        if domains:
-            params1["domains"] = domains
-        
-        # Second API call - GNews
-        url2 = "https://gnews.io/api/v4/search"
-        params2 = {
-            "apikey": GNEWS_API_KEY,
-            "lang": language,
-            "country": "us",
-            "max": 10
-        }
-        
-        # Add parameters to second API
-        if search:
-            params2["q"] = "newsweek AND " + search
+
+        # Determine which sources to use
+        all_sources = {"thenewsapi", "gnews", "nytimes"}
+        if sources:
+            selected_sources = set(s.strip().lower() for s in sources.split(",") if s.strip()) & all_sources
+            if not selected_sources:
+                selected_sources = all_sources
         else:
-            params2["q"] = "newsweek"
-        if published_after:
-            # Convert YYYY-MM-DD to timestamp for GNews
-            try:
-                date_obj = datetime.strptime(published_after, "%Y-%m-%d")
-                params2["from"] = date_obj.strftime("%Y-%m-%dT00:00:00Z")
-            except:
-                pass
-        
-        # Make both API calls
-        response1 = requests.get(url1, params=params1)
-        response1.raise_for_status()
-        
-        response2 = requests.get(url2, params=params2)
-        response2.raise_for_status()
-        
-        data1 = response1.json()
-        data2 = response2.json()
-        
-        # Clear previous articles and store new ones
-        news_articles.clear()
-        
-        # Process first API results (TheNewsAPI)
-        articles1 = data1.get("data", [])
-        for article in articles1:
-            article['source_api'] = 'thenewsapi'
-        news_articles.extend(articles1)
-        
-        # Process second API results (GNews)
-        articles2 = data2.get("articles", [])
-        for article in articles2:
-            # Transform GNews format to match our structure
-            transformed_article = {
-                'uuid': article.get('url', ''),  # Use URL as UUID
-                'title': article.get('title', ''),
-                'description': article.get('description', ''),
-                'url': article.get('url', ''),
-                'image_url': article.get('image', ''),
-                'language': article.get('language', language),
-                'published_at': article.get('publishedAt', ''),
-                'source': article.get('source', {}).get('name', ''),
-                'categories': ['general'],  # GNews doesn't provide categories
-                'source_api': 'gnews'
-            }
-            news_articles.append(transformed_article)
-        
-        # Print the articles in a formatted way
+            selected_sources = all_sources
+
+        news_articles = []
+        meta = {}
+
+        # Fetch from TheNewsAPI
+        if "thenewsapi" in selected_sources:
+            articles1, meta1 = fetch_thenewsapi_articles(categories, language, search, domains, published_after)
+            news_articles.extend(articles1)
+            meta["thenewsapi"] = meta1
+        # Fetch from GNews
+        if "gnews" in selected_sources:
+            articles2, meta2 = fetch_gnews_articles(language, search, published_after)
+            news_articles.extend(articles2)
+            meta["gnews"] = meta2
+        # Fetch from NYTimes
+        if "nytimes" in selected_sources:
+            articles3, meta3 = fetch_nytimes_articles(language, search, published_after)
+            news_articles.extend(articles3)
+            meta["nytimes"] = meta3
+
+        # Print the articles in a formatted way (optional, for debug)
         print("\n=== Latest News Articles ===")
         print(f"Language: {language}")
         if categories:
@@ -135,8 +89,8 @@ async def get_news(
             print(f"Filtered by domains: {domains}")
         print(f"Published after: {published_after}")
         print(f"Extract content: {extract}")
-        print(f"Total articles from both APIs: {len(news_articles)}")
-        
+        print(f"Sources: {', '.join(selected_sources)}")
+        print(f"Total articles from selected APIs: {len(news_articles)}")
         for idx, article in enumerate(news_articles, 1):
             print(f"\nArticle {idx} (from {article.get('source_api', 'unknown')}):")
             print(f"Title: {article.get('title', 'N/A')}")
@@ -147,11 +101,10 @@ async def get_news(
             print(f"Categories: {', '.join(article.get('categories', []))}")
             print(f"Language: {article.get('language', 'N/A')}")
             print("-" * 80)
-        
         print(f"\nTotal articles fetched: {len(news_articles)}")
-        print(f"TheNewsAPI - Found: {data1.get('meta', {}).get('found', 0)}, Returned: {data1.get('meta', {}).get('returned', 0)}")
-        print(f"GNews - Total Results: {data2.get('totalArticles', 0)}")
-        
+        for k, v in meta.items():
+            print(f"{k} meta: {v}")
+
         # Extract article content if requested and merge with articles
         if extract and news_articles:
             print(f"\n=== Extracting content from {len(news_articles)} articles ===")
@@ -159,28 +112,20 @@ async def get_news(
             if urls:
                 extracted_articles = extract_multiple_articles(urls, delay=1.0)
                 print(f"Successfully extracted content from {len(extracted_articles)} articles")
-                
-                # Merge extracted content with original articles
                 for i, article in enumerate(news_articles):
                     if i < len(extracted_articles):
                         extracted_content = extracted_articles[i]
-                        
-                        # Add extracted content directly to article fields
                         if extracted_content.get('content'):
                             article['content'] = extracted_content.get('content')
-                        
                         if extracted_content.get('summary'):
                             article['summary'] = extracted_content.get('summary')
-                        
                         if extracted_content.get('author'):
                             article['author'] = extracted_content.get('author')
-                        
-                        # Add extraction error if any
                         if extracted_content.get('error'):
                             article['extraction_error'] = extracted_content.get('error')
                     else:
                         article['extraction_error'] = "Failed to extract content"
-        
+
         return {
             "status": "success",
             "language": language,
@@ -189,13 +134,8 @@ async def get_news(
             "domains_filter": domains,
             "published_after": published_after,
             "extract_content": extract,
-            "meta": {
-                "thenewsapi": data1.get("meta", {}),
-                "gnews": {
-                    "totalArticles": data2.get("totalArticles", 0),
-                    "articles": len(articles2)
-                }
-            },
+            "sources": list(selected_sources),
+            "meta": meta,
             "articles": news_articles
         }
     except requests.RequestException as e:

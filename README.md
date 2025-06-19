@@ -49,16 +49,19 @@ The service will be available at `http://localhost:8000`
 - `domains`: Comma-separated list of domains to filter by
 - `published_after`: Filter articles published after this date (YYYY-MM-DD format, default: yesterday)
 - `extract`: Extract article content (default: true)
+- `sources`: Comma-separated list of sources to use (`thenewsapi`, `gnews`, `nytimes`). Example: `sources=thenewsapi,gnews`. If omitted, all sources are used by default.
 
 ## Features
 
-- **Dual API Integration**: Fetches news from both TheNewsAPI and GNews
+- **Multi-API Integration**: Fetches news from TheNewsAPI, GNews, and NYTimes
+- **Source Toggling**: Select which APIs to use via the `sources` parameter
 - **Content Extraction**: Automatically extracts full article content from URLs
 - **Multiple Filters**: Search, categories, domains, language, and date filtering
 - **Automatic API Documentation**: Swagger UI and ReDoc
 - **CORS Support**: Cross-origin requests enabled
 - **Error Handling**: Graceful handling of API failures
 - **Rate Limiting**: Built-in delays to respect API limits
+- **Modular API Logic**: Each news source is handled by a separate function for easy maintenance and extension
 
 ## Security
 
@@ -69,10 +72,16 @@ The service will be available at `http://localhost:8000`
 ## Example Usage
 
 ```bash
-# Get all recent news
+# Get all recent news from all sources
 GET http://localhost:8000/news
 
-# Search for specific topics
+# Only get news from TheNewsAPI and GNews
+GET http://localhost:8000/news?sources=thenewsapi,gnews
+
+# Only get news from NYTimes
+GET http://localhost:8000/news?sources=nytimes
+
+# Search for specific topics from all sources
 GET http://localhost:8000/news?search=technology
 
 # Filter by categories and domains
