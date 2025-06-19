@@ -32,18 +32,26 @@ def fetch_gnews_articles(language="en", search=None, published_after=None, limit
         "country": "us",
         "max": limit
     }
+    
+    query = ""
     if search:
         # If search is a comma-separated list or multiple words, join with ' AND '
         if ',' in search:
             search_terms = [s.strip() for s in search.split(',') if s.strip()]
-            params["q"] = ' AND '.join(search_terms)
+            query = ' AND '.join(search_terms)
         elif ' ' in search.strip():
             search_terms = [s.strip() for s in search.strip().split() if s.strip()]
-            params["q"] = ' AND '.join(search_terms)
+            query = ' AND '.join(search_terms)
         else:
-            params["q"] = search
+            query = search
+        
+        if "newsweek" not in query.lower():
+            params["q"] = query + " AND newsweek"
+        else:
+            params["q"] = query
     else:
         params["q"] = "newsweek"
+        
     if published_after:
         try:
             date_obj = datetime.strptime(published_after, "%Y-%m-%d")
