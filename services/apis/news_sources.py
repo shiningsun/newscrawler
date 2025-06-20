@@ -1,6 +1,6 @@
 import requests
 from datetime import datetime
-from config import THENEWSAPI_TOKEN, GNEWS_API_KEY, NYTIMES_API_KEY
+from config import THENEWSAPI_TOKEN, GNEWS_API_KEY, NYTIMES_API_KEY, GUARDIAN_API_KEY
 
 def fetch_thenewsapi_articles(categories=None, language="en", search=None, domains=None, published_after=None, limit=10):
     url = "https://api.thenewsapi.com/v1/news/top"
@@ -125,7 +125,7 @@ def fetch_nytimes_articles(language="en", search=None, published_after=None, lim
 def fetch_guardian_articles(language="en", search=None, published_after=None, limit=10):
     url = "https://content.guardianapis.com/search"
     params = {
-        "api-key": "aa186ad1-74c3-4a98-a447-dd90aa6afbc3",
+        "api-key": GUARDIAN_API_KEY,
         "order-by": "newest",
         "page-size": limit,
         "show-fields": "trailText,headline,byline,thumbnail,bodyText,publication"
