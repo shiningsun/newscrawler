@@ -3,9 +3,11 @@ from datetime import datetime, timedelta
 from services.apis.news_sources import fetch_thenewsapi_articles, fetch_gnews_articles, fetch_nytimes_articles, fetch_guardian_articles
 from utils.article_extractor import extract_multiple_articles
 import requests
+from motor.motor_asyncio import AsyncIOMotorCollection
 
 class NewsService:
-    def __init__(self):
+    def __init__(self, news_collection: AsyncIOMotorCollection):
+        self.news_collection = news_collection
         # Map source names to fetch functions
         self.source_strategies = {
             "thenewsapi": fetch_thenewsapi_articles,
@@ -14,7 +16,7 @@ class NewsService:
             "guardian": fetch_guardian_articles,
         }
 
-    def get_news(
+    async def get_news(
         self,
         categories: Optional[str] = None,
         language: str = "en",
@@ -46,9 +48,19 @@ class NewsService:
                 if source == "thenewsapi":
                     articles, meta_info = fetch_func(categories, language, search, domains, published_after, limit)
                 else:
-                    articles, meta_info = fetch_func(language, search, published_after, limit)
+                    articles, meta_info = fetch_func(language=language, search=search, published_after=published_after, limit=limit)
                 news_articles.extend(articles)
                 meta[source] = meta_info
+
+            # Save articles to MongoDB
+            if news_articles:
+                for article in news_articles:
+                    # Use URL as the unique identifier
+                    await self.news_collection.update_one(
+                        {'_id': article['url']},
+                        {'$set': article},
+                        upsert=True
+                    )
 
             # Print the articles in a formatted way (optional, for debug)
             print("\n=== Latest News Articles ===")

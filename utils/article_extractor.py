@@ -1,10 +1,11 @@
 import requests
 from bs4 import BeautifulSoup
 import re
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Tuple
 import time
 from urllib.parse import urlparse
 import logging
+from motor.motor_asyncio import AsyncIOMotorCollection
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -219,6 +220,28 @@ class ArticleExtractor:
                 time.sleep(delay)
         
         return results
+
+async def get_or_extract_article_content(url: str, news_collection: AsyncIOMotorCollection, force_extract: bool = False) -> Tuple[Dict[str, str], str]:
+    """
+    Get article content from cache or extract it from the web.
+    Returns a tuple of the article content and the source ('cache' or 'fetch').
+    """
+    if not force_extract:
+        # Check if article already extracted in MongoDB
+        article_doc = await news_collection.find_one({"_id": url})
+        if article_doc and "extracted" in article_doc:
+            logger.info(f"Article '{url}' returned from cache.")
+            return article_doc["extracted"], "cache"
+
+    # If not in cache, or if force_extract is true, extract and store
+    logger.info(f"Article '{url}' fetched from the web.")
+    content = extract_article_content(url)
+    await news_collection.update_one(
+        {"_id": url},
+        {"$set": {"extracted": content, "url": url}},
+        upsert=True
+    )
+    return content, "fetch"
 
 # Convenience function for single article extraction
 def extract_article_content(url: str) -> Dict[str, str]:
