@@ -41,6 +41,8 @@ class ArticleExtractor:
             response = self.session.get(url, timeout=10)
             response.raise_for_status()
             
+            final_url = response.url # Get the final URL after redirects
+
             # Parse HTML content
             soup = BeautifulSoup(response.content, 'html.parser')
             
@@ -65,7 +67,7 @@ class ArticleExtractor:
                 'summary': summary,
                 'author': author,
                 'published_date': published_date,
-                'url': url,
+                'url': final_url, # Return the final URL
                 'error': None
             }
             
@@ -77,7 +79,7 @@ class ArticleExtractor:
                 'summary': None,
                 'author': None,
                 'published_date': None,
-                'url': url,
+                'url': url, # On error, return the original URL
                 'error': str(e)
             }
     
