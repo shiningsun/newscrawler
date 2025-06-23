@@ -32,7 +32,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://root:password@localhost:27017/")
 MONGO_DB = os.getenv("MONGO_DB", "news_db")
 
 client = AsyncIOMotorClient(MONGO_URI)

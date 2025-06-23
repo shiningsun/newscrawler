@@ -1,7 +1,7 @@
 from typing import Optional, Dict, List
 from datetime import datetime, timedelta
 from services.apis.news_sources import fetch_thenewsapi_articles, fetch_gnews_articles, fetch_nytimes_articles, fetch_guardian_articles
-from utils.article_extractor import extract_multiple_articles
+from utils.article_extractor import get_or_extract_article_content
 import requests
 from motor.motor_asyncio import AsyncIOMotorCollection
 
@@ -91,24 +91,26 @@ class NewsService:
 
             # Extract article content if requested and merge with articles
             if extract and news_articles:
-                print(f"\n=== Extracting content from {len(news_articles)} articles ===")
-                urls = [article.get('url') for article in news_articles if article.get('url')]
-                if urls:
-                    extracted_articles = extract_multiple_articles(urls, delay=1.0)
-                    print(f"Successfully extracted content from {len(extracted_articles)} articles")
-                    for i, article in enumerate(news_articles):
-                        if i < len(extracted_articles):
-                            extracted_content = extracted_articles[i]
-                            if extracted_content.get('content'):
-                                article['content'] = extracted_content.get('content')
-                            if extracted_content.get('summary'):
-                                article['summary'] = extracted_content.get('summary')
-                            if extracted_content.get('author'):
-                                article['author'] = extracted_content.get('author')
-                            if extracted_content.get('error'):
-                                article['extraction_error'] = extracted_content.get('error')
-                        else:
-                            article['extraction_error'] = "Failed to extract content"
+                print(f"\n=== Extracting content for {len(news_articles)} articles (using cache if available) ===")
+                for article in news_articles:
+                    url = article.get('url')
+                    if not url:
+                        continue
+                    
+                    try:
+                        extracted_content, source = await get_or_extract_article_content(url, self.news_collection)
+                        print(f"Content for '{article.get('title')}' from {source}")
+                        
+                        if extracted_content:
+                            article.update({
+                                'content': extracted_content.get('content'),
+                                'summary': extracted_content.get('summary'),
+                                'author': extracted_content.get('author'),
+                                'extraction_error': extracted_content.get('error')
+                            })
+                    except Exception as e:
+                        print(f"Error extracting content for {url}: {e}")
+                        article['extraction_error'] = str(e)
 
             return {
                 "status": "success",

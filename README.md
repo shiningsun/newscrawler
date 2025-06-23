@@ -66,14 +66,36 @@ GUARDIAN_API_KEY = "YOUR_GUARDIAN_API_KEY_HERE"
 - [NYTimes](https://developer.nytimes.com/)
 - [The Guardian](https://open-platform.theguardian.com/)
 
-### 4. MongoDB Setup (Optional)
-The service uses MongoDB for caching and persistence. Set environment variables:
-```bash
-export MONGO_URI="mongodb://localhost:27017"
-export MONGO_DB="news_db"
-```
+### 4. MongoDB Setup
+This service uses Docker to run a MongoDB container for caching and data persistence.
 
-If MongoDB is not available, the service will still work but without caching.
+1.  **Start MongoDB using Docker Compose**:
+    ```bash
+    docker-compose up -d
+    ```
+
+2.  **Configure Environment Variables (Optional)**:
+    The application is pre-configured to connect to the Dockerized MongoDB instance. If you need to customize the connection, you can set these environment variables.
+    
+    For Windows (Command Prompt):
+    ```cmd
+    set MONGO_URI="mongodb://root:password@localhost:27017/"
+    set MONGO_DB="news_db"
+    ```
+
+    For Windows (PowerShell):
+    ```powershell
+    $env:MONGO_URI="mongodb://root:password@localhost:27017/"
+    $env:MONGO_DB="news_db"
+    ```
+
+    For Linux/macOS:
+    ```bash
+    export MONGO_URI="mongodb://root:password@localhost:27017/"
+    export MONGO_DB="news_db"
+    ```
+
+If MongoDB is not available, the service will still function but without caching.
 
 ## Running the Service
 
