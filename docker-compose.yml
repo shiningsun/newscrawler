@@ -1,17 +1,32 @@
 version: '3.8'
+
 services:
-  mongodb:
-    image: mongo:latest
-    container_name: mongodb
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo-data:/data/db
+  postgres:
+    image: postgres:15
+    container_name: news_postgres
     environment:
-      MONGO_INITDB_ROOT_USERNAME: root
-      MONGO_INITDB_ROOT_PASSWORD: password
-    restart: always
+      POSTGRES_DB: news_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  app:
+    build: .
+    container_name: news_crawler_app
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:password@postgres:5432/news_db
+      - THENEWSAPI_TOKEN=${THENEWSAPI_TOKEN}
+      - GNEWS_API_KEY=${GNEWS_API_KEY}
+      - NYTIMES_API_KEY=${NYTIMES_API_KEY}
+    depends_on:
+      - postgres
+    restart: unless-stopped
 
 volumes:
-  mongo-data:
-    driver: local 
+  postgres_data: 

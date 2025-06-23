@@ -1,305 +1,267 @@
 # News Crawler Service
 
-A comprehensive Python service built with FastAPI that fetches news from multiple APIs, extracts article content, and stores data in MongoDB for caching and persistence.
+A Python news crawler service using FastAPI that fetches news from multiple APIs (TheNewsAPI, GNews, NYTimes, Guardian) and extracts article content, storing data in PostgreSQL database.
 
 ## Features
 
-- **Multi-API Integration**: Fetches news from TheNewsAPI, GNews, NYTimes, and The Guardian
-- **Content Extraction**: Automatically extracts full article content from URLs using web scraping
-- **MongoDB Integration**: Stores articles and extracted content for caching and persistence
-- **Source Toggling**: Select which APIs to use via the `sources` parameter
-- **Advanced Filtering**: Search, categories, domains, language, and date filtering
-- **Rate Limiting**: Built-in delays to respect API limits and be respectful to web servers
-- **Error Handling**: Graceful handling of API failures and extraction errors
-- **Automatic API Documentation**: Swagger UI and ReDoc
-- **CORS Support**: Cross-origin requests enabled
-- **Modular Architecture**: Each news source is handled by a separate function for easy maintenance
+- **Multiple News Sources**: Fetch news from TheNewsAPI, GNews, NYTimes, and Guardian APIs
+- **Google News Crawler**: Web scraping of Google News with category filtering and content extraction
+- **Content Extraction**: Extract full article content from URLs using web scraping
+- **SQL Database**: Store articles in PostgreSQL with proper indexing and relationships
+- **Caching**: Cache extracted content to avoid repeated web scraping
+- **Filtering**: Filter articles by categories, language, search terms, domains, date, and sources
+- **RESTful API**: Clean FastAPI endpoints with automatic documentation
 
-## Project Structure
+## Prerequisites
 
-```
-newsCrawler/
-├── main.py                 # FastAPI application entry point
-├── config_template.py      # Configuration template
-├── requirements.txt        # Python dependencies
-├── services/
-│   ├── news_service.py     # Main news service logic
-│   └── apis/
-│       └── news_sources.py # Individual API integrations
-└── utils/
-    └── article_extractor.py # Web scraping and content extraction
-```
+- Python 3.11+
+- PostgreSQL 15+
+- Docker and Docker Compose (optional)
 
-## Setup
+## Installation
 
-### 1. Create a Virtual Environment
+### Option 1: Using Docker (Recommended)
+
+1. Clone the repository:
 ```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+git clone <repository-url>
+cd newsCrawler
 ```
 
-### 2. Install Dependencies
+2. Create a `.env` file with your API keys:
+```bash
+THENEWSAPI_TOKEN=your_thenewsapi_token
+GNEWS_API_KEY=your_gnews_api_key
+NYTIMES_API_KEY=your_nytimes_api_key
+```
+
+3. Start the services:
+```bash
+docker-compose up -d
+```
+
+The application will be available at `http://localhost:8000`
+
+### Option 2: Local Development
+
+1. Install Python dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. Configure API Keys
-Copy `config_template.py` to `config.py` and add your API keys:
+2. Set up PostgreSQL database:
+```bash
+# Create database
+createdb news_db
 
-```python
-# TheNewsAPI Configuration
-THENEWSAPI_TOKEN = "YOUR_THENEWSAPI_TOKEN_HERE"
-
-# GNews API Configuration  
-GNEWS_API_KEY = "YOUR_GNEWS_API_KEY_HERE"
-
-# NYTimes API Configuration
-NYTIMES_API_KEY = "YOUR_NYTIMES_API_KEY_HERE"
-
-# Guardian API Configuration
-GUARDIAN_API_KEY = "YOUR_GUARDIAN_API_KEY_HERE"
+# Or using psql
+psql -U postgres
+CREATE DATABASE news_db;
 ```
 
-**Get API Keys:**
-- [TheNewsAPI](https://thenewsapi.com/)
-- [GNews](https://gnews.io/)
-- [NYTimes](https://developer.nytimes.com/)
-- [The Guardian](https://open-platform.theguardian.com/)
+3. Set environment variables:
+```bash
+export DATABASE_URL="postgresql+asyncpg://postgres:password@localhost:5432/news_db"
+export THENEWSAPI_TOKEN="your_thenewsapi_token"
+export GNEWS_API_KEY="your_gnews_api_key"
+export NYTIMES_API_KEY="your_nytimes_api_key"
+```
 
-### 4. MongoDB Setup
-This service uses Docker to run a MongoDB container for caching and data persistence.
+4. Set up database tables:
+```bash
+python setup_database.py
+```
 
-1.  **Start MongoDB using Docker Compose**:
-    ```bash
-    docker-compose up -d
-    ```
-
-2.  **Configure Environment Variables (Optional)**:
-    The application is pre-configured to connect to the Dockerized MongoDB instance. If you need to customize the connection, you can set these environment variables.
-    
-    For Windows (Command Prompt):
-    ```cmd
-    set MONGO_URI="mongodb://root:password@localhost:27017/"
-    set MONGO_DB="news_db"
-    ```
-
-    For Windows (PowerShell):
-    ```powershell
-    $env:MONGO_URI="mongodb://root:password@localhost:27017/"
-    $env:MONGO_DB="news_db"
-    ```
-
-    For Linux/macOS:
-    ```bash
-    export MONGO_URI="mongodb://root:password@localhost:27017/"
-    export MONGO_DB="news_db"
-    ```
-
-If MongoDB is not available, the service will still function but without caching.
-
-## Running the Service
-
-Start the service:
+5. Run the application:
 ```bash
 python main.py
 ```
 
-The service will be available at `http://localhost:8000`
+## Database Schema
+
+The application uses PostgreSQL with the following main table:
+
+### Articles Table
+- `id`: Primary key (auto-increment)
+- `url`: Unique URL identifier
+- `title`: Article title
+- `description`: Article description
+- `content`: Full article content (extracted)
+- `summary`: Article summary
+- `author`: Article author
+- `image_url`: Featured image URL
+- `language`: Article language code
+- `published_at`: Publication date
+- `source`: News source name
+- `source_api`: API source identifier
+- `categories`: JSON array of categories
+- `extraction_error`: Error message if extraction failed
+- `created_at`: Record creation timestamp
+- `updated_at`: Record update timestamp
 
 ## API Endpoints
 
-### Core Endpoints
-- `GET /`: Welcome message
-- `GET /health`: Health check endpoint
-- `GET /docs`: Interactive API documentation (Swagger UI)
-- `GET /redoc`: Alternative API documentation (ReDoc)
+### 1. Get News Articles
+```
+GET /news
+```
 
-### News Endpoints
-- `GET /news`: Fetch news articles with optional parameters
-- `GET /extract-article`: Extract content from a single article URL
-- `GET /extract-articles`: Extract content from stored news articles
-- `POST /crawlnews`: Crawl Google News categories, filter by search keyword(s), and load articles into MongoDB. Only articles with content of at least 1000 characters are considered.
+**Parameters:**
+- `categories`: Comma-separated list of categories
+- `language`: Language code (default: "en")
+- `search`: Search term to filter articles
+- `domains`: Comma-separated list of domains
+- `published_after`: Filter articles published after date (YYYY-MM-DD)
+- `extract`: Extract article content (default: true)
+- `sources`: Comma-separated list of sources (thenewsapi,gnews,nytimes,guardian)
+- `limit`: Maximum number of articles (default: 10)
 
-## News Endpoint Parameters
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `categories` | string | None | Comma-separated list of categories to filter by |
-| `language` | string | "en" | Language code |
-| `search` | string | None | Search term to filter articles |
-| `domains` | string | None | Comma-separated list of domains to filter by |
-| `published_after` | string | yesterday | Filter articles published after this date (YYYY-MM-DD) |
-| `extract` | boolean | true | Extract article content from URLs |
-| `sources` | string | all | Comma-separated list of sources: `thenewsapi`, `gnews`, `nytimes`, `guardian` |
-| `limit` | integer | 10 | Maximum number of articles per source |
-
-## Example Usage
-
-### Basic News Fetching
+**Example:**
 ```bash
-# Get all recent news from all sources
-GET http://localhost:8000/news
-
-# Get 5 articles from each source
-GET http://localhost:8000/news?limit=5
-
-# Search for specific topics
-GET http://localhost:8000/news?search=artificial intelligence
-GET http://localhost:8000/news?search=climate change,renewable energy
+curl "http://localhost:8000/news?categories=technology&language=en&limit=5"
 ```
 
-### Source Selection
+### 2. Extract Single Article
+```
+GET /extract-article
+```
+
+**Parameters:**
+- `url`: URL of the article to extract
+- `force_extract`: Force extraction from web (default: false)
+
+**Example:**
 ```bash
-# Only get news from specific sources
-GET http://localhost:8000/news?sources=thenewsapi,gnews
-GET http://localhost:8000/news?sources=nytimes,guardian&limit=3
+curl "http://localhost:8000/extract-article?url=https://example.com/article"
 ```
 
-### Advanced Filtering
+### 3. Extract Multiple Articles
+```
+GET /extract-articles
+```
+
+**Parameters:**
+- `limit`: Number of articles to extract (default: 5)
+- `delay`: Delay between requests in seconds (default: 1.0)
+- `force_extract`: Force extraction from web (default: false)
+
+**Example:**
 ```bash
-# Filter by categories and domains
-GET http://localhost:8000/news?categories=business,technology&domains=bbc.com,techcrunch.com
-
-# Get news from specific date range
-GET http://localhost:8000/news?published_after=2024-01-01
-
-# Disable content extraction for faster response
-GET http://localhost:8000/news?extract=false
+curl "http://localhost:8000/extract-articles?limit=3&delay=2.0"
 ```
 
-### Content Extraction
+### 4. Crawl Google News
+```
+POST /crawlnews
+```
+
+**Parameters:**
+- `categories`: Comma-separated list of Google News categories
+- `language`: Language code (default: "en")
+- `search`: Keyword(s) to filter articles
+- `limit`: Maximum number of articles (default: 10)
+
+**Example:**
 ```bash
-# Extract content from a specific article
-GET http://localhost:8000/extract-article?url=https://example.com/article
-
-# Extract content from stored articles
-GET http://localhost:8000/extract-articles?limit=5&delay=1.0
+curl -X POST "http://localhost:8000/crawlnews?categories=technology,world&search=AI&limit=5"
 ```
 
-### Google News Crawling Endpoint
+## Google News Crawler
 
-- `POST /crawlnews`: Crawl Google News categories, filter by search keyword(s), and load articles into MongoDB. Only articles with content of at least 1000 characters are considered.
+The Google News crawler provides:
+- Dynamic category discovery from Google News homepage
+- Content extraction from publisher URLs
+- URL decoding using `google-news-url-decoder`
+- Anti-blocking measures (user-agent rotation, delays)
+- Content filtering (minimum 1000 characters)
+- Search keyword filtering
 
-### Parameters
-| Parameter   | Type    | Default | Description |
-|-------------|---------|---------|-------------|
-| `categories`| string  | None    | Comma-separated list of Google News categories to crawl (e.g. `us,world,technology`). If omitted, crawls the homepage. |
-| `language`  | string  | "en"   | Language code for Google News |
-| `search`    | string  | None    | Keyword(s) to filter articles by title or content (case-insensitive) |
-| `limit`     | int     | 10      | Maximum number of articles to return (sorted by most recent) |
+## Configuration
 
-### Filtering & Logic
-- Only articles with a `content` field of at least 1000 characters are considered.
-- If `search` is provided, only articles whose title or content contains the search keyword(s) (case-insensitive) are returned.
-- Results are sorted by `published_at` (most recent first).
-- The number of returned articles is limited by the `limit` parameter.
-- All returned articles are upserted into MongoDB.
+### Environment Variables
+- `DATABASE_URL`: PostgreSQL connection string
+- `THENEWSAPI_TOKEN`: TheNewsAPI authentication token
+- `GNEWS_API_KEY`: GNews API key
+- `NYTIMES_API_KEY`: NYTimes API key
 
-### Example Usage
+### Database Configuration
+The application automatically creates tables on startup. For production, consider using Alembic for database migrations.
+
+## Database Management
+
+### Setup Database
 ```bash
-# Crawl the 'technology' and 'us' categories for articles mentioning 'trump', return up to 5 results
-POST http://localhost:8000/crawlnews?categories=technology,us&search=trump&limit=5
+python setup_database.py
 ```
 
-### Example Response
-```json
-{
-  "status": "success",
-  "categories": "technology,us",
-  "language": "en",
-  "search": "trump",
-  "limit": 5,
-  "articles_returned": 3,
-  "inserted": 2,
-  "updated": 1,
-  "meta": {"totalArticles": 3, "note": "Scraped from Google News. May be unstable."},
-  "articles": [
-    {
-      "title": "Trump floats regime change as Iran fires dozens of missiles on Israel",
-      "url": "https://news.google.com/articles/xyz...",
-      "content": "...",
-      "published_at": "2024-06-22T10:00:00Z",
-      ...
-    },
-    ...
-  ]
-}
+### Database Management Tool
+```bash
+python db_manage.py
 ```
 
-> **Note:** Google News crawling is only available via the `/crawlnews` endpoint. It is not accessible as a source in `/news`.
+The database management tool provides:
+- Show database statistics
+- View recent articles
+- Search articles by title or content
+- Cleanup old articles
+- Reset database
 
-## Search Logic
+## Development
 
-### GNews Search Behavior
-- Multiple search terms are joined with ' AND ' for precise results
-- Examples:
-  - `search=china,iran` → `q=china AND iran`
-  - `search=climate change` → `q=climate AND change`
-
-### Content Extraction Features
-- **Automatic Caching**: Extracted content is stored in MongoDB
-- **Force Extraction**: Use `force_extract=true` to bypass cache
-- **Rate Limiting**: Built-in delays between requests (default: 1 second)
-- **Error Handling**: Graceful handling of extraction failures
-
-## Response Format
-
-The `/news` endpoint returns:
-```json
-{
-  "status": "success",
-  "language": "en",
-  "categories_filter": "business",
-  "search_term": "technology",
-  "domains_filter": "bbc.com",
-  "published_after": "2024-01-01",
-  "extract_content": true,
-  "sources": ["thenewsapi", "gnews"],
-  "meta": {
-    "thenewsapi": {...},
-    "gnews": {...}
-  },
-  "articles": [
-    {
-      "title": "Article Title",
-      "description": "Article description",
-      "url": "https://example.com/article",
-      "source": "Source Name",
-      "published_at": "2024-01-01T10:00:00Z",
-      "content": "Extracted article content...",
-      "summary": "Article summary...",
-      "author": "Author Name",
-      "categories": ["business", "technology"],
-      "source_api": "thenewsapi"
-    }
-  ]
-}
+### Project Structure
+```
+newsCrawler/
+├── main.py                 # FastAPI application entry point
+├── database.py            # SQLAlchemy database configuration
+├── setup_database.py      # Database setup script
+├── db_manage.py          # Database management utilities
+├── requirements.txt       # Python dependencies
+├── docker-compose.yml     # Docker services configuration
+├── Dockerfile            # Application container
+├── services/
+│   ├── news_service.py   # News service business logic
+│   └── apis/
+│       ├── news_sources.py      # API integrations
+│       └── google_news_crawler.py # Google News scraper
+└── utils/
+    └── article_extractor.py     # Content extraction utilities
 ```
 
-## Security Considerations
+### Adding New News Sources
+1. Add the source to `services/apis/news_sources.py`
+2. Update the `source_strategies` mapping in `NewsService`
+3. Add any required API keys to environment variables
 
-- API keys are stored in `config.py` which is ignored by git
-- Never commit your actual API keys to version control
-- Use the `config_template.py` as a reference for required configuration
-- The service includes rate limiting to respect API limits
+## Troubleshooting
 
-## Dependencies
+### Common Issues
 
-- **FastAPI**: Modern web framework for building APIs
-- **Uvicorn**: ASGI server for running FastAPI
-- **Requests**: HTTP library for API calls
-- **BeautifulSoup4**: Web scraping for content extraction
-- **Motor**: Async MongoDB driver
-- **Pydantic**: Data validation using Python type annotations
+1. **Database Connection Errors**
+   - Ensure PostgreSQL is running
+   - Check DATABASE_URL format
+   - Verify database exists
+   - Run `python setup_database.py` to create tables
 
-## Contributing
+2. **Google News Crawling Issues**
+   - Google may block requests if too frequent
+   - Check user-agent rotation and delays
+   - Verify URL decoder is working
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
+3. **Content Extraction Failures**
+   - Some websites block scraping
+   - Check extraction_error field for details
+   - Try force_extract=true to bypass cache
+
+4. **Missing Dependencies**
+   - Run `pip install -r requirements.txt`
+   - Ensure all SQLAlchemy dependencies are installed
+
+## API Documentation
+
+Once the service is running, you can access:
+- **Swagger UI**: `http://localhost:8000/docs`
+- **ReDoc**: `http://localhost:8000/redoc`
 
 ## License
 
-This project is open source and available under the MIT License. 
+This project is licensed under the MIT License. 

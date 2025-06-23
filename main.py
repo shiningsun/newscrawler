@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from typing import Dict, List, Optional
@@ -8,7 +8,9 @@ import json
 from utils.article_extractor import extract_article_content, extract_multiple_articles, get_or_extract_article_content
 from config import THENEWSAPI_TOKEN, GNEWS_API_KEY, NYTIMES_API_KEY, HOST, PORT
 from services.news_service import NewsService
-from motor.motor_asyncio import AsyncIOMotorClient
+from sqlalchemy.ext.asyncio import AsyncSession
+from database import get_db, create_tables, Article
+from sqlalchemy import select
 import os
 import logging
 import traceback
@@ -33,16 +35,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://root:password@localhost:27017/")
-MONGO_DB = os.getenv("MONGO_DB", "news_db")
-
-client = AsyncIOMotorClient(MONGO_URI)
-db = client[MONGO_DB]
-
-def get_news_collection():
-    return db.news_articles
-
-news_service = NewsService(get_news_collection())
+@app.on_event("startup")
+async def startup_event():
+    """Create database tables on startup"""
+    await create_tables()
+    logger.info("Database tables created successfully")
 
 @app.get("/")
 async def root() -> Dict[str, str]:
@@ -61,12 +58,14 @@ async def get_news(
     published_after: str = Query(default=None, description="Filter articles published after this date (YYYY-MM-DD format, default: yesterday)"),
     extract: bool = Query(True, description="Extract article content (default: true)"),
     sources: Optional[str] = Query(None, description="Comma-separated list of sources to use: thenewsapi,gnews,nytimes,guardian (default: all)"),
-    limit: int = Query(10, description="Maximum number of articles to fetch from each source (default: 10)")
+    limit: int = Query(10, description="Maximum number of articles to fetch from each source (default: 10)"),
+    db: AsyncSession = Depends(get_db)
 ) -> Dict:
     """
     Fetch news articles from selected sources (TheNewsAPI, GNews, NYTimes, Guardian).
     """
     try:
+        news_service = NewsService(db)
         return await news_service.get_news(
             categories=categories,
             language=language,
@@ -84,15 +83,14 @@ async def get_news(
 @app.get("/extract-article")
 async def extract_single_article(
     url: str = Query(..., description="URL of the article to extract content from"),
-    force_extract: bool = Query(False, description="Force extraction from the web and update the cache.")
+    force_extract: bool = Query(False, description="Force extraction from the web and update the cache."),
+    db: AsyncSession = Depends(get_db)
 ) -> Dict:
     """
-    Extract content from a single article URL, using MongoDB for caching.
+    Extract content from a single article URL, using SQL database for caching.
     """
     try:
-        news_collection = get_news_collection()
-        
-        content, source = await get_or_extract_article_content(url, news_collection, force_extract)
+        content, source = await get_or_extract_article_content(url, db, force_extract)
         
         return {
             "status": "success",
@@ -107,16 +105,17 @@ async def extract_single_article(
 async def extract_articles_from_news(
     limit: Optional[int] = Query(5, description="Number of articles to extract (default: 5)"),
     delay: float = Query(1.0, description="Delay between requests in seconds (default: 1.0)"),
-    force_extract: bool = Query(False, description="Force extraction from the web and update the cache.")
+    force_extract: bool = Query(False, description="Force extraction from the web and update the cache."),
+    db: AsyncSession = Depends(get_db)
 ) -> Dict:
     """
-    Extract content from the most recent news articles, using MongoDB for caching.
+    Extract content from the most recent news articles, using SQL database for caching.
     """
     try:
-        news_collection = get_news_collection()
         # Get URLs from the stored news articles
-        cursor = news_collection.find({}, {"url": 1, "_id": 0}).limit(limit)
-        urls = [article.get('url') for article in await cursor.to_list(length=limit) if article.get('url')]
+        stmt = select(Article.url).limit(limit)
+        result = await db.execute(stmt)
+        urls = [row[0] for row in result.fetchall() if row[0]]
 
         if not urls:
             raise HTTPException(status_code=400, detail="No valid URLs found in news articles.")
@@ -125,7 +124,7 @@ async def extract_articles_from_news(
 
         extracted_articles = []
         for url in urls:
-            content, _ = await get_or_extract_article_content(url, news_collection, force_extract)
+            content, _ = await get_or_extract_article_content(url, db, force_extract)
             extracted_articles.append(content)
 
         return {
@@ -142,18 +141,20 @@ async def crawl_google_news(
     categories: Optional[str] = Query(None, description="Comma-separated list of Google News categories to crawl (e.g. 'us,world,technology')"),
     language: str = Query("en", description="Language code (default: en)"),
     search: Optional[str] = Query(None, description="Keyword(s) to filter articles by title or content (case-insensitive)"),
-    limit: int = Query(10, description="Maximum number of articles to return (default: 10)")
+    limit: int = Query(10, description="Maximum number of articles to return (default: 10)"),
+    db: AsyncSession = Depends(get_db)
 ) -> Dict:
     """
-    Crawl Google News categories, filter by search keyword(s), and load articles into MongoDB.
+    Crawl Google News categories, filter by search keyword(s), and load articles into SQL database.
     Only articles with content of at least 1000 characters are considered.
     """
     try:
-        news_collection = get_news_collection()
         articles, meta = fetch_googlenews_articles(categories=categories, language=language, limit=100)
         inserted, updated = 0, 0
+        
         # Filter out articles with content < 1000 characters
         substantial_articles = [a for a in articles if a.get('content') and len(a['content']) >= 1000]
+        
         # Filter by search keyword(s) if provided
         filtered_articles = []
         if search:
@@ -166,21 +167,35 @@ async def crawl_google_news(
                     filtered_articles.append(article)
         else:
             filtered_articles = substantial_articles
+        
         # Sort by published_at (most recent first)
         filtered_articles.sort(key=lambda x: x.get('published_at', ''), reverse=True)
+        
         # Limit the number of returned results
         filtered_articles = filtered_articles[:limit]
-        # Upsert filtered articles into MongoDB
-        for article in filtered_articles:
-            result = await news_collection.update_one(
-                {'_id': article['url']},
-                {'$set': article},
-                upsert=True
-            )
-            if result.upserted_id:
-                inserted += 1
-            elif result.modified_count > 0:
+        
+        # Upsert filtered articles into SQL database
+        for article_data in filtered_articles:
+            # Check if article already exists
+            stmt = select(Article).where(Article.url == article_data['url'])
+            result = await db.execute(stmt)
+            existing_article = result.scalar_one_or_none()
+            
+            if existing_article:
+                # Update existing article
+                for key, value in article_data.items():
+                    if hasattr(existing_article, key):
+                        setattr(existing_article, key, value)
+                existing_article.updated_at = datetime.utcnow()
                 updated += 1
+            else:
+                # Create new article
+                new_article = Article(**article_data)
+                db.add(new_article)
+                inserted += 1
+        
+        await db.commit()
+        
         return {
             "status": "success",
             "categories": categories,
@@ -198,4 +213,4 @@ async def crawl_google_news(
         raise HTTPException(status_code=500, detail=f"Error crawling Google News: {str(e)}")
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host=HOST, port=PORT, reload=True) 
+    uvicorn.run(app, host=HOST, port=PORT) 

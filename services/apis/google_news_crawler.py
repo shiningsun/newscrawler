@@ -1,6 +1,6 @@
 from typing import List, Dict, Optional, Tuple
 from bs4 import BeautifulSoup
-from datetime import datetime
+from datetime import datetime, timezone
 import requests
 import logging
 import random
@@ -27,6 +27,28 @@ def _get_random_headers():
         'Referer': 'https://www.google.com/',
         'Cookie': 'CONSENT=YES+1'
     }
+
+def _parse_datetime(date_string: str) -> datetime:
+    """Parse datetime string to timezone-naive datetime object"""
+    try:
+        # Try parsing ISO format first
+        dt = datetime.fromisoformat(date_string.replace('Z', '+00:00'))
+        # Convert to UTC and remove timezone info
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+    except ValueError:
+        try:
+            # Try parsing with strptime for common formats
+            for fmt in ['%Y-%m-%dT%H:%M:%SZ', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S']:
+                try:
+                    return datetime.strptime(date_string, fmt)
+                except ValueError:
+                    continue
+        except:
+            pass
+        # Fallback to current time (timezone-naive)
+        return datetime.utcnow()
 
 # In-memory cache for category links, to avoid scraping them on every call
 _google_category_links_cache = {}
@@ -96,7 +118,8 @@ def _scrape_google_news_page(url: str, language: str, limit: int) -> List[Dict[s
             source_elem = item.find('div', class_='bInWSc')
             source = source_elem.get_text() if source_elem else 'Unknown Source'
             time_elem = item.find('time', class_='hvbAAd')
-            published_at = time_elem['datetime'] if time_elem and 'datetime' in time_elem.attrs else datetime.utcnow().isoformat()
+            published_at_str = time_elem['datetime'] if time_elem and 'datetime' in time_elem.attrs else datetime.utcnow().isoformat()
+            published_at = _parse_datetime(published_at_str)
             
             if article_url:
                 try:
@@ -116,7 +139,6 @@ def _scrape_google_news_page(url: str, language: str, limit: int) -> List[Dict[s
                     final_url = extracted_data.get('url')
 
                     article_data = {
-                        'uuid': final_url, # Use final publisher URL
                         'title': extracted_data.get('title') or title,
                         'description': extracted_data.get('summary', ''),
                         'content': extracted_data.get('content', ''),
