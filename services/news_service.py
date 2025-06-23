@@ -4,6 +4,7 @@ from services.apis.news_sources import fetch_thenewsapi_articles, fetch_gnews_ar
 from utils.article_extractor import get_or_extract_article_content
 import requests
 from motor.motor_asyncio import AsyncIOMotorCollection
+import logging
 
 class NewsService:
     def __init__(self, news_collection: AsyncIOMotorCollection):
@@ -47,6 +48,8 @@ class NewsService:
                 fetch_func = self.source_strategies[source]
                 if source == "thenewsapi":
                     articles, meta_info = fetch_func(categories, language, search, domains, published_after, limit)
+                elif source == "googlenews":
+                    articles, meta_info = fetch_func(categories=categories, language=language, limit=limit)
                 else:
                     articles, meta_info = fetch_func(language=language, search=search, published_after=published_after, limit=limit)
                 news_articles.extend(articles)

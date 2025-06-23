@@ -12,6 +12,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 import traceback
+from services.apis.google_news_crawler import fetch_googlenews_articles
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -135,6 +136,66 @@ async def extract_articles_from_news(
     except Exception as e:
         logger.error(f"Error extracting articles: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error extracting articles: {str(e)}")
+
+@app.post("/crawlnews")
+async def crawl_google_news(
+    categories: Optional[str] = Query(None, description="Comma-separated list of Google News categories to crawl (e.g. 'us,world,technology')"),
+    language: str = Query("en", description="Language code (default: en)"),
+    search: Optional[str] = Query(None, description="Keyword(s) to filter articles by title or content (case-insensitive)"),
+    limit: int = Query(10, description="Maximum number of articles to return (default: 10)")
+) -> Dict:
+    """
+    Crawl Google News categories, filter by search keyword(s), and load articles into MongoDB.
+    Only articles with content of at least 1000 characters are considered.
+    """
+    try:
+        news_collection = get_news_collection()
+        articles, meta = fetch_googlenews_articles(categories=categories, language=language, limit=100)
+        inserted, updated = 0, 0
+        # Filter out articles with content < 1000 characters
+        substantial_articles = [a for a in articles if a.get('content') and len(a['content']) >= 1000]
+        # Filter by search keyword(s) if provided
+        filtered_articles = []
+        if search:
+            search_lower = search.lower()
+            for article in substantial_articles:
+                title = article.get('title', '').lower()
+                content = article.get('content', '')
+                content_lower = content.lower() if content else ''
+                if search_lower in title or search_lower in content_lower:
+                    filtered_articles.append(article)
+        else:
+            filtered_articles = substantial_articles
+        # Sort by published_at (most recent first)
+        filtered_articles.sort(key=lambda x: x.get('published_at', ''), reverse=True)
+        # Limit the number of returned results
+        filtered_articles = filtered_articles[:limit]
+        # Upsert filtered articles into MongoDB
+        for article in filtered_articles:
+            result = await news_collection.update_one(
+                {'_id': article['url']},
+                {'$set': article},
+                upsert=True
+            )
+            if result.upserted_id:
+                inserted += 1
+            elif result.modified_count > 0:
+                updated += 1
+        return {
+            "status": "success",
+            "categories": categories,
+            "language": language,
+            "search": search,
+            "limit": limit,
+            "articles_returned": len(filtered_articles),
+            "inserted": inserted,
+            "updated": updated,
+            "meta": meta,
+            "articles": filtered_articles
+        }
+    except Exception as e:
+        logger.error(f"Error in /crawlnews endpoint: {e}")
+        raise HTTPException(status_code=500, detail=f"Error crawling Google News: {str(e)}")
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host=HOST, port=PORT, reload=True) 

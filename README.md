@@ -118,6 +118,7 @@ The service will be available at `http://localhost:8000`
 - `GET /news`: Fetch news articles with optional parameters
 - `GET /extract-article`: Extract content from a single article URL
 - `GET /extract-articles`: Extract content from stored news articles
+- `POST /crawlnews`: Crawl Google News categories, filter by search keyword(s), and load articles into MongoDB. Only articles with content of at least 1000 characters are considered.
 
 ## News Endpoint Parameters
 
@@ -173,6 +174,56 @@ GET http://localhost:8000/extract-article?url=https://example.com/article
 
 # Extract content from stored articles
 GET http://localhost:8000/extract-articles?limit=5&delay=1.0
+```
+
+### Google News Crawling Endpoint
+
+- `POST /crawlnews`: Crawl Google News categories, filter by search keyword(s), and load articles into MongoDB. Only articles with content of at least 1000 characters are considered.
+
+#### Parameters
+| Parameter   | Type    | Default | Description |
+|-------------|---------|---------|-------------|
+| `categories`| string  | None    | Comma-separated list of Google News categories to crawl (e.g. `us,world,technology`). If omitted, crawls the homepage. |
+| `language`  | string  | "en"   | Language code for Google News |
+| `search`    | string  | None    | Keyword(s) to filter articles by title or content (case-insensitive) |
+| `limit`     | int     | 10      | Maximum number of articles to return (sorted by most recent) |
+
+#### Filtering & Logic
+- Only articles with a `content` field of at least 1000 characters are considered.
+- If `search` is provided, only articles whose title or content contains the search keyword(s) (case-insensitive) are returned.
+- Results are sorted by `published_at` (most recent first).
+- The number of returned articles is limited by the `limit` parameter.
+- All returned articles are upserted into MongoDB.
+
+#### Example Usage
+```bash
+# Crawl the 'technology' and 'us' categories for articles mentioning 'trump', return up to 5 results
+POST http://localhost:8000/crawlnews?categories=technology,us&search=trump&limit=5
+```
+
+#### Example Response
+```json
+{
+  "status": "success",
+  "categories": "technology,us",
+  "language": "en",
+  "search": "trump",
+  "limit": 5,
+  "articles_returned": 3,
+  "inserted": 2,
+  "updated": 1,
+  "meta": {"totalArticles": 3, "note": "Scraped from Google News. May be unstable."},
+  "articles": [
+    {
+      "title": "Trump floats regime change as Iran fires dozens of missiles on Israel",
+      "url": "https://news.google.com/articles/xyz...",
+      "content": "...",
+      "published_at": "2024-06-22T10:00:00Z",
+      ...
+    },
+    ...
+  ]
+}
 ```
 
 ## Search Logic
@@ -250,3 +301,5 @@ The `/news` endpoint returns:
 ## License
 
 This project is open source and available under the MIT License. 
+
+> **Note:** Google News crawling is only available via the `/crawlnews` endpoint. It is no longer accessible as a source in `/news`. 
