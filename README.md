@@ -180,7 +180,7 @@ GET http://localhost:8000/extract-articles?limit=5&delay=1.0
 
 - `POST /crawlnews`: Crawl Google News categories, filter by search keyword(s), and load articles into MongoDB. Only articles with content of at least 1000 characters are considered.
 
-#### Parameters
+### Parameters
 | Parameter   | Type    | Default | Description |
 |-------------|---------|---------|-------------|
 | `categories`| string  | None    | Comma-separated list of Google News categories to crawl (e.g. `us,world,technology`). If omitted, crawls the homepage. |
@@ -188,20 +188,20 @@ GET http://localhost:8000/extract-articles?limit=5&delay=1.0
 | `search`    | string  | None    | Keyword(s) to filter articles by title or content (case-insensitive) |
 | `limit`     | int     | 10      | Maximum number of articles to return (sorted by most recent) |
 
-#### Filtering & Logic
+### Filtering & Logic
 - Only articles with a `content` field of at least 1000 characters are considered.
 - If `search` is provided, only articles whose title or content contains the search keyword(s) (case-insensitive) are returned.
 - Results are sorted by `published_at` (most recent first).
 - The number of returned articles is limited by the `limit` parameter.
 - All returned articles are upserted into MongoDB.
 
-#### Example Usage
+### Example Usage
 ```bash
 # Crawl the 'technology' and 'us' categories for articles mentioning 'trump', return up to 5 results
 POST http://localhost:8000/crawlnews?categories=technology,us&search=trump&limit=5
 ```
 
-#### Example Response
+### Example Response
 ```json
 {
   "status": "success",
@@ -225,6 +225,8 @@ POST http://localhost:8000/crawlnews?categories=technology,us&search=trump&limit
   ]
 }
 ```
+
+> **Note:** Google News crawling is only available via the `/crawlnews` endpoint. It is not accessible as a source in `/news`.
 
 ## Search Logic
 
@@ -301,5 +303,3 @@ The `/news` endpoint returns:
 ## License
 
 This project is open source and available under the MIT License. 
-
-> **Note:** Google News crawling is only available via the `/crawlnews` endpoint. It is no longer accessible as a source in `/news`. 
