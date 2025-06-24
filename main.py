@@ -10,7 +10,7 @@ from config import THENEWSAPI_TOKEN, GNEWS_API_KEY, NYTIMES_API_KEY, HOST, PORT
 from services.news_service import NewsService
 from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db, create_tables, Article
-from sqlalchemy import select
+from sqlalchemy import select, or_, func
 import os
 import logging
 import traceback
@@ -138,79 +138,164 @@ async def extract_articles_from_news(
 
 @app.post("/crawlnews")
 async def crawl_google_news(
-    categories: Optional[str] = Query(None, description="Comma-separated list of Google News categories to crawl (e.g. 'us,world,technology')"),
+    categories: Optional[str] = Query(None, description="Comma-separated list of Google News categories to crawl (e.g. 'us,world,technology'). If not provided, all available categories will be crawled."),
     language: str = Query("en", description="Language code (default: en)"),
-    search: Optional[str] = Query(None, description="Keyword(s) to filter articles by title or content (case-insensitive)"),
-    limit: int = Query(10, description="Maximum number of articles to return (default: 10)"),
     db: AsyncSession = Depends(get_db)
 ) -> Dict:
     """
-    Crawl Google News categories, filter by search keyword(s), and load articles into SQL database.
+    Crawl Google News categories and load articles into SQL database.
     Only articles with content of at least 1000 characters are considered.
+    If no categories are specified, all available categories will be crawled.
     """
     try:
+        # If no categories provided, crawl all available categories
+        if not categories:
+            categories = "us,world,technology,business,entertainment,health,science,sports"
+        
         articles, meta = fetch_googlenews_articles(categories=categories, language=language, limit=100)
         inserted, updated = 0, 0
         
         # Filter out articles with content < 1000 characters
         substantial_articles = [a for a in articles if a.get('content') and len(a['content']) >= 1000]
         
-        # Filter by search keyword(s) if provided
-        filtered_articles = []
-        if search:
-            search_lower = search.lower()
-            for article in substantial_articles:
-                title = article.get('title', '').lower()
-                content = article.get('content', '')
-                content_lower = content.lower() if content else ''
-                if search_lower in title or search_lower in content_lower:
-                    filtered_articles.append(article)
-        else:
-            filtered_articles = substantial_articles
-        
         # Sort by published_at (most recent first)
-        filtered_articles.sort(key=lambda x: x.get('published_at', ''), reverse=True)
+        substantial_articles.sort(key=lambda x: x.get('published_at', ''), reverse=True)
         
-        # Limit the number of returned results
-        filtered_articles = filtered_articles[:limit]
+        # Upsert articles into SQL database
+        for article_data in substantial_articles:
+            try:
+                # Check if article already exists
+                stmt = select(Article).where(Article.url == article_data['url'])
+                result = await db.execute(stmt)
+                existing_article = result.scalar_one_or_none()
+                
+                if existing_article:
+                    # Update existing article
+                    for key, value in article_data.items():
+                        if hasattr(existing_article, key):
+                            setattr(existing_article, key, value)
+                    existing_article.updated_at = datetime.utcnow()
+                    updated += 1
+                    logger.info(f"Updated existing article: {article_data.get('title', 'Unknown')[:50]}...")
+                else:
+                    # Create new article
+                    new_article = Article(**article_data)
+                    db.add(new_article)
+                    inserted += 1
+                    logger.info(f"Added new article: {article_data.get('title', 'Unknown')[:50]}...")
+                
+                # Commit after each article to avoid transaction issues
+                await db.commit()
+                
+            except Exception as e:
+                logger.error(f"Error processing article {article_data.get('url', 'Unknown URL')}: {e}")
+                # Rollback the session to prevent transaction issues
+                await db.rollback()
+                continue
         
-        # Upsert filtered articles into SQL database
-        for article_data in filtered_articles:
-            # Check if article already exists
-            stmt = select(Article).where(Article.url == article_data['url'])
-            result = await db.execute(stmt)
-            existing_article = result.scalar_one_or_none()
-            
-            if existing_article:
-                # Update existing article
-                for key, value in article_data.items():
-                    if hasattr(existing_article, key):
-                        setattr(existing_article, key, value)
-                existing_article.updated_at = datetime.utcnow()
-                updated += 1
-            else:
-                # Create new article
-                new_article = Article(**article_data)
-                db.add(new_article)
-                inserted += 1
-        
-        await db.commit()
+        logger.info(f"Successfully processed {inserted} new articles and {updated} updated articles")
         
         return {
             "status": "success",
             "categories": categories,
             "language": language,
-            "search": search,
-            "limit": limit,
-            "articles_returned": len(filtered_articles),
+            "articles_processed": len(substantial_articles),
             "inserted": inserted,
             "updated": updated,
             "meta": meta,
-            "articles": filtered_articles
+            "articles": substantial_articles
         }
     except Exception as e:
         logger.error(f"Error in /crawlnews endpoint: {e}")
+        # Rollback session on any error
+        await db.rollback()
         raise HTTPException(status_code=500, detail=f"Error crawling Google News: {str(e)}")
+
+@app.get("/search")
+async def search_articles(
+    q: str = Query(..., description="Search query - keywords to search for in article titles, descriptions, and content"),
+    limit: int = Query(20, description="Maximum number of articles to return (default: 20)"),
+    offset: int = Query(0, description="Number of articles to skip for pagination (default: 0)"),
+    db: AsyncSession = Depends(get_db)
+) -> Dict:
+    """
+    Search articles in the database for keywords in titles, descriptions, and content.
+    Returns articles that contain the search query (case-insensitive).
+    Only articles with content length of at least 800 characters are considered.
+    """
+    try:
+        if not q.strip():
+            raise HTTPException(status_code=400, detail="Search query 'q' parameter is required")
+        
+        # Create search query using SQL LIKE for case-insensitive search
+        search_term = f"%{q.strip()}%"
+        
+        # Search in title, description, content, and author fields
+        # Also filter out articles with content length less than 800 characters
+        stmt = select(Article).where(
+            or_(
+                func.lower(Article.title).like(func.lower(search_term)),
+                func.lower(Article.description).like(func.lower(search_term)),
+                func.lower(Article.content).like(func.lower(search_term)),
+                func.lower(Article.author).like(func.lower(search_term))
+            ),
+            func.length(Article.content) >= 800
+        ).order_by(Article.published_at.desc()).offset(offset).limit(limit)
+        
+        result = await db.execute(stmt)
+        articles = result.scalars().all()
+        
+        # Convert SQLAlchemy objects to dictionaries
+        article_list = []
+        for article in articles:
+            article_dict = {
+                "id": article.id,
+                "title": article.title,
+                "description": article.description,
+                "content": article.content,
+                "author": article.author,
+                "url": article.url,
+                "image_url": article.image_url,
+                "language": article.language,
+                "published_at": article.published_at.isoformat() if article.published_at else None,
+                "source": article.source,
+                "categories": article.categories,
+                "source_api": article.source_api,
+                "extraction_error": article.extraction_error,
+                "created_at": article.created_at.isoformat() if article.created_at else None,
+                "updated_at": article.updated_at.isoformat() if article.updated_at else None
+            }
+            article_list.append(article_dict)
+        
+        # Get total count for pagination info (also filtering by content length)
+        count_stmt = select(func.count(Article.id)).where(
+            or_(
+                func.lower(Article.title).like(func.lower(search_term)),
+                func.lower(Article.description).like(func.lower(search_term)),
+                func.lower(Article.content).like(func.lower(search_term)),
+                func.lower(Article.author).like(func.lower(search_term))
+            ),
+            func.length(Article.content) >= 800
+        )
+        count_result = await db.execute(count_stmt)
+        total_count = count_result.scalar()
+        
+        return {
+            "status": "success",
+            "query": q,
+            "total_results": total_count,
+            "limit": limit,
+            "offset": offset,
+            "articles_found": len(article_list),
+            "min_content_length": 800,
+            "articles": article_list
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in /search endpoint: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error searching articles: {str(e)}")
 
 if __name__ == "__main__":
     uvicorn.run(app, host=HOST, port=PORT) 

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from database import Article
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,45 @@ def _get_random_headers():
         'Referer': 'https://www.google.com/',
     }
 
+def _clean_text(text: str) -> str:
+    """
+    Clean and sanitize text content to ensure it's valid UTF-8.
+    Removes invalid characters and normalizes whitespace.
+    """
+    if not text:
+        return ""
+    
+    try:
+        # Convert to string if it's not already
+        text = str(text)
+        
+        # Remove null bytes and other invalid UTF-8 characters
+        text = text.replace('\x00', '')
+        
+        # Remove other problematic characters
+        text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', text)
+        
+        # Normalize whitespace
+        text = re.sub(r'\s+', ' ', text)
+        
+        # Strip leading/trailing whitespace
+        text = text.strip()
+        
+        # Ensure it's valid UTF-8
+        text.encode('utf-8')
+        
+        return text
+    except (UnicodeEncodeError, UnicodeDecodeError) as e:
+        logger.warning(f"Unicode error in text cleaning: {e}")
+        # Try to recover by removing problematic characters
+        try:
+            # Remove all non-printable characters
+            text = ''.join(char for char in text if char.isprintable() or char.isspace())
+            text = text.encode('utf-8', errors='ignore').decode('utf-8')
+            return text.strip()
+        except Exception:
+            return ""
+
 def extract_article_content(url: str) -> Dict:
     """
     Extract article content from a given URL.
@@ -42,7 +82,11 @@ def extract_article_content(url: str) -> Dict:
         # Get the final URL after redirects
         final_url = response.url
         
-        soup = BeautifulSoup(response.content, 'html.parser')
+        # Try to detect encoding
+        if response.encoding:
+            soup = BeautifulSoup(response.content, 'html.parser', from_encoding=response.encoding)
+        else:
+            soup = BeautifulSoup(response.content, 'html.parser')
         
         # Remove script and style elements
         for script in soup(["script", "style"]):
@@ -69,6 +113,9 @@ def extract_article_content(url: str) -> Dict:
                     title = title_elem.get_text().strip()
                 if title:
                     break
+        
+        # Clean title
+        title = _clean_text(title)
         
         # Extract content
         content = ""
@@ -105,6 +152,9 @@ def extract_article_content(url: str) -> Dict:
             paragraphs = soup.find_all('p')
             content = ' '.join([p.get_text().strip() for p in paragraphs if len(p.get_text().strip()) > 50])
         
+        # Clean content
+        content = _clean_text(content)
+        
         # Extract author
         author = ""
         author_selectors = [
@@ -123,6 +173,9 @@ def extract_article_content(url: str) -> Dict:
                 author = author_elem.get_text().strip()
                 if author:
                     break
+        
+        # Clean author
+        author = _clean_text(author)
         
         # Create summary (first 200 characters of content)
         summary = content[:200] + "..." if len(content) > 200 else content

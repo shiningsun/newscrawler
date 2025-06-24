@@ -8,6 +8,8 @@ from sqlalchemy import select, update
 from database import Article
 import logging
 
+logger = logging.getLogger(__name__)
+
 class NewsService:
     def __init__(self, db_session: AsyncSession):
         self.db_session = db_session
@@ -54,29 +56,75 @@ class NewsService:
                     articles, meta_info = fetch_func(categories=categories, language=language, limit=limit)
                 else:
                     articles, meta_info = fetch_func(language=language, search=search, published_after=published_after, limit=limit)
-                news_articles.extend(articles)
-                meta[source] = meta_info
-
-            # Save articles to SQL database
-            if news_articles:
-                for article_data in news_articles:
-                    # Check if article already exists
-                    stmt = select(Article).where(Article.url == article_data['url'])
-                    result = await self.db_session.execute(stmt)
-                    existing_article = result.scalar_one_or_none()
-                    
-                    if existing_article:
-                        # Update existing article
-                        for key, value in article_data.items():
-                            if hasattr(existing_article, key):
-                                setattr(existing_article, key, value)
-                        existing_article.updated_at = datetime.utcnow()
-                    else:
-                        # Create new article
-                        new_article = Article(**article_data)
-                        self.db_session.add(new_article)
                 
-                await self.db_session.commit()
+                # Process and save each article immediately
+                for article_data in articles:
+                    try:
+                        # Check if article already exists
+                        stmt = select(Article).where(Article.url == article_data['url'])
+                        result = await self.db_session.execute(stmt)
+                        existing_article = result.scalar_one_or_none()
+                        
+                        if existing_article:
+                            # Update existing article
+                            for key, value in article_data.items():
+                                if hasattr(existing_article, key):
+                                    setattr(existing_article, key, value)
+                            existing_article.updated_at = datetime.utcnow()
+                        else:
+                            # Create new article
+                            new_article = Article(**article_data)
+                            self.db_session.add(new_article)
+                        
+                        # Commit immediately after each article
+                        await self.db_session.commit()
+                        
+                        # Extract content immediately if requested
+                        if extract:
+                            url = article_data.get('url')
+                            if url:
+                                try:
+                                    extracted_content, source = await get_or_extract_article_content(url, self.db_session)
+                                    print(f"Content for '{article_data.get('title')}' from {source}")
+                                    
+                                    if extracted_content:
+                                        article_data.update({
+                                            'content': extracted_content.get('content'),
+                                            'summary': extracted_content.get('summary'),
+                                            'author': extracted_content.get('author'),
+                                            'extraction_error': extracted_content.get('error')
+                                        })
+                                        
+                                        # Update the database with extracted content immediately
+                                        stmt = select(Article).where(Article.url == url)
+                                        result = await self.db_session.execute(stmt)
+                                        db_article = result.scalar_one_or_none()
+                                        
+                                        if db_article:
+                                            db_article.content = extracted_content.get('content')
+                                            db_article.summary = extracted_content.get('summary')
+                                            db_article.author = extracted_content.get('author')
+                                            db_article.extraction_error = extracted_content.get('error')
+                                            db_article.updated_at = datetime.utcnow()
+                                            
+                                        await self.db_session.commit()
+                                except Exception as e:
+                                    logger.error(f"Error extracting content for {url}: {e}")
+                                    article_data['extraction_error'] = str(e)
+                                    # Rollback the session to prevent transaction issues
+                                    await self.db_session.rollback()
+                        
+                        # Add to news_articles list
+                        news_articles.append(article_data)
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing article {article_data.get('url', 'unknown')}: {e}")
+                        # Rollback the session to prevent transaction issues
+                        await self.db_session.rollback()
+                        # Continue with next article instead of failing completely
+                        continue
+                
+                meta[source] = meta_info
 
             # Print the articles in a formatted way (optional, for debug)
             print("\n=== Latest News Articles ===")
@@ -105,43 +153,6 @@ class NewsService:
             for k, v in meta.items():
                 print(f"{k} meta: {v}")
 
-            # Extract article content if requested and merge with articles
-            if extract and news_articles:
-                print(f"\n=== Extracting content for {len(news_articles)} articles (using cache if available) ===")
-                for article in news_articles:
-                    url = article.get('url')
-                    if not url:
-                        continue
-                    
-                    try:
-                        extracted_content, source = await get_or_extract_article_content(url, self.db_session)
-                        print(f"Content for '{article.get('title')}' from {source}")
-                        
-                        if extracted_content:
-                            article.update({
-                                'content': extracted_content.get('content'),
-                                'summary': extracted_content.get('summary'),
-                                'author': extracted_content.get('author'),
-                                'extraction_error': extracted_content.get('error')
-                            })
-                            
-                            # Update the database with extracted content
-                            stmt = select(Article).where(Article.url == url)
-                            result = await self.db_session.execute(stmt)
-                            db_article = result.scalar_one_or_none()
-                            
-                            if db_article:
-                                db_article.content = extracted_content.get('content')
-                                db_article.summary = extracted_content.get('summary')
-                                db_article.author = extracted_content.get('author')
-                                db_article.extraction_error = extracted_content.get('error')
-                                db_article.updated_at = datetime.utcnow()
-                                
-                            await self.db_session.commit()
-                    except Exception as e:
-                        print(f"Error extracting content for {url}: {e}")
-                        article['extraction_error'] = str(e)
-
             return {
                 "status": "success",
                 "language": language,
@@ -155,4 +166,12 @@ class NewsService:
                 "articles": news_articles
             }
         except requests.RequestException as e:
-            raise Exception(f"Error fetching news: {str(e)}") 
+            logger.error(f"Request error in get_news: {e}")
+            # Rollback session on request errors
+            await self.db_session.rollback()
+            raise Exception(f"Error fetching news: {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error in get_news: {e}")
+            # Rollback session on any unexpected errors
+            await self.db_session.rollback()
+            raise 

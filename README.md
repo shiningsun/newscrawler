@@ -99,6 +99,20 @@ The application uses PostgreSQL with the following main table:
 - `created_at`: Record creation timestamp
 - `updated_at`: Record update timestamp
 
+## Database Schema Fixes
+
+- **Schema Migration:**  
+  The database schema has been updated to ensure all text fields (such as `description`, `content`, `summary`, and `extraction_error`) use the `TEXT` type, and all `VARCHAR` columns have been extended to large sizes to prevent truncation errors.
+- **One-off Fix Scripts Removed:**  
+  Temporary schema fix scripts (`fix_database_schema.py`, `fix_db_schema_simple.py`, `fix_db_schema_final.py`, `force_fix_db_schema.py`) were used to correct legacy schema issues.  
+  **These scripts have now been deleted** after confirming the schema is correct and stable.
+- **Best Practice:**  
+  For future schema changes, use a migration tool such as [Alembic](https://alembic.sqlalchemy.org/) to manage database migrations in a robust and versioned way.
+
+> **Note:**
+> If you encounter schema-related errors (e.g., string truncation), ensure your database schema matches the SQLAlchemy model definitions in `database.py`.  
+> If you need to reapply schema fixes, refer to your version control history or use a migration tool.
+
 ## API Endpoints
 
 ### 1. Get News Articles

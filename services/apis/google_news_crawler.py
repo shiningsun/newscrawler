@@ -72,18 +72,109 @@ def _get_google_news_category_links(language: str) -> Dict[str, str]:
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
         
-        nav_container = soup.find('div', jsname='r2235c')
+        # Try multiple selectors for navigation
+        nav_selectors = [
+            'div[jsname="r2235c"]',  # Original selector
+            'nav',  # Generic nav element
+            'div[role="navigation"]',  # Navigation role
+            'div[class*="nav"]',  # Class containing nav
+            'div[class*="menu"]',  # Class containing menu
+            'header',  # Header element
+            'div[class*="header"]'  # Header class
+        ]
+        
+        nav_container = None
+        for selector in nav_selectors:
+            nav_container = soup.select_one(selector)
+            if nav_container:
+                logger.info(f"Found navigation container using selector: {selector}")
+                break
+        
         if nav_container:
-            links = nav_container.find_all('a', class_='SFllF')
-            for link in links:
-                name = link.text.strip().lower().replace('u.s.', 'us')
+            # Try multiple link selectors
+            link_selectors = [
+                'a[class*="SFllF"]',  # Original class
+                'a[href*="/topics/"]',  # Links containing /topics/
+                'a[href*="section"]',  # Links containing section
+                'a[class*="nav"]',  # Navigation class
+                'a[class*="menu"]',  # Menu class
+                'a[class*="link"]',  # Link class
+                'nav a',  # Any link in nav
+                'a[href^="./"]'  # Relative links
+            ]
+            
+            for selector in link_selectors:
+                links = nav_container.select(selector)
+                if links:
+                    logger.info(f"Found {len(links)} links using selector: {selector}")
+                    for link in links:
+                        name = link.get_text().strip().lower()
+                        href = link.get('href')
+                        
+                        # Clean up the name
+                        name = name.replace('u.s.', 'us').replace('&', 'and').replace(' ', '')
+                        
+                        if name and href:
+                            # Handle different href formats
+                            if href.startswith('./topics/'):
+                                full_url = 'https://news.google.com' + href[1:]
+                                category_links[name] = full_url
+                                logger.info(f"Added category: {name} -> {full_url}")
+                            elif href.startswith('/topics/'):
+                                full_url = 'https://news.google.com' + href
+                                category_links[name] = full_url
+                                logger.info(f"Added category: {name} -> {full_url}")
+                            elif 'topics' in href:
+                                # Handle full URLs
+                                if href.startswith('http'):
+                                    category_links[name] = href
+                                    logger.info(f"Added category: {name} -> {href}")
+                                else:
+                                    full_url = 'https://news.google.com' + href
+                                    category_links[name] = full_url
+                                    logger.info(f"Added category: {name} -> {full_url}")
+                    
+                    # If we found links, break out of the selector loop
+                    if len(category_links) > 1:  # More than just 'home'
+                        break
+        
+        # If no categories found, try a broader search
+        if len(category_links) <= 1:
+            logger.info("No categories found with navigation selectors, trying broader search...")
+            all_links = soup.find_all('a', href=True)
+            for link in all_links:
                 href = link.get('href')
-                if name and href and href.startswith('./topics/'):
-                    full_url = 'https://news.google.com' + href[1:]
+                name = link.get_text().strip().lower()
+                
+                if href and 'topics' in href and name:
+                    name = name.replace('u.s.', 'us').replace('&', 'and').replace(' ', '')
+                    if href.startswith('./'):
+                        full_url = 'https://news.google.com' + href[1:]
+                    elif href.startswith('/'):
+                        full_url = 'https://news.google.com' + href
+                    else:
+                        full_url = href
+                    
                     category_links[name] = full_url
+                    logger.info(f"Added category via broad search: {name} -> {full_url}")
+        
+        # Fallback to common categories if still no categories found
+        if len(category_links) <= 1:
+            logger.info("No categories found, using fallback categories...")
+            fallback_categories = {
+                'us': 'https://news.google.com/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGRqTVhZU0FtVnVHZ0pWVXlnQVAB',
+                'world': 'https://news.google.com/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx1YlY4U0FtVnVHZ0pWVXlnQVAB',
+                'technology': 'https://news.google.com/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGRqTVhZU0FtVnVHZ0pWVXlnQVAB/sections/CAQiRENCQVNMQW9JTDIwdk1EZGpNWFlTQW1WdUdnSlZVekpDZ2FJQ0FRYUNnb0lMMjB2TURkak1YWVNBbVZ1R2dKVlV6Q0NBZ0lB',
+                'business': 'https://news.google.com/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx1YlY4U0FtVnVHZ0pWVXlnQVAB/sections/CAQiRENCQVNMQW9JTDIwdk1EbHViVjhTQW1WdUdnSlZVekpDZ2FJQ0FRYUNnb0lMMjB2TURsdWJWOENBbVZ1R2dKVlV6Q0NBZ0lB',
+                'entertainment': 'https://news.google.com/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx1YlY4U0FtVnVHZ0pWVXlnQVAB/sections/CAQiRENCQVNMQW9JTDIwdk1EbHViVjhTQW1WdUdnSlZVekpDZ2FJQ0FRYUNnb0lMMjB2TURsdWJWOENBbVZ1R2dKVlV6Q0NBZ0lB',
+                'health': 'https://news.google.com/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx1YlY4U0FtVnVHZ0pWVXlnQVAB/sections/CAQiRENCQVNMQW9JTDIwdk1EbHViVjhTQW1WdUdnSlZVekpDZ2FJQ0FRYUNnb0lMMjB2TURsdWJWOENBbVZ1R2dKVlV6Q0NBZ0lB',
+                'science': 'https://news.google.com/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx1YlY4U0FtVnVHZ0pWVXlnQVAB/sections/CAQiRENCQVNMQW9JTDIwdk1EbHViVjhTQW1WdUdnSlZVekpDZ2FJQ0FRYUNnb0lMMjB2TURsdWJWOENBbVZ1R2dKVlV6Q0NBZ0lB',
+                'sports': 'https://news.google.com/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx1YlY4U0FtVnVHZ0pWVXlnQVAB/sections/CAQiRENCQVNMQW9JTDIwdk1EbHViVjhTQW1WdUdnSlZVekpDZ2FJQ0FRYUNnb0lMMjB2TURsdWJWOENBbVZ1R2dKVlV6Q0NBZ0lB'
+            }
+            category_links.update(fallback_categories)
         
         _google_category_links_cache[language] = category_links
-        logger.info(f"Dynamically scraped Google News categories for '{language}': {list(category_links.keys())}")
+        logger.info(f"Final Google News categories for '{language}': {list(category_links.keys())}")
         return category_links
 
     except Exception as e:
@@ -201,24 +292,60 @@ def fetch_googlenews_articles(
     Scrapes Google News for top stories from specified categories or the homepage.
     Category links are fetched dynamically.
     """
+    logger.info(f"Starting Google News crawl with categories: {categories}, language: {language}, limit: {limit}")
+    
     google_news_categories = _get_google_news_category_links(language)
+    logger.info(f"Available categories: {list(google_news_categories.keys())}")
     
     if categories:
-        selected_cats = [c.strip().lower() for c in categories.split(',') if c.strip().lower() in google_news_categories]
+        # Parse and clean category names
+        requested_cats = [c.strip().lower().replace(' ', '') for c in categories.split(',')]
+        logger.info(f"Requested categories (cleaned): {requested_cats}")
+        
+        # Match requested categories with available categories
+        selected_cats = []
+        for requested_cat in requested_cats:
+            for available_cat in google_news_categories.keys():
+                if requested_cat in available_cat or available_cat in requested_cat:
+                    selected_cats.append(available_cat)
+                    logger.info(f"Matched '{requested_cat}' to '{available_cat}'")
+                    break
+        
         if not selected_cats:
+            logger.warning(f"No matching categories found for: {requested_cats}. Using 'home' category.")
             selected_cats = ['home']
     else:
-        selected_cats = ['home']
+        # Use all available categories except 'home' to avoid duplication
+        selected_cats = [cat for cat in google_news_categories.keys() if cat != 'home']
+        if not selected_cats:
+            selected_cats = ['home']
+        logger.info(f"No categories specified, using all available categories: {selected_cats}")
 
+    logger.info(f"Final selected categories: {selected_cats}")
+    
     all_articles = []
     for category in selected_cats:
-        url = google_news_categories[category]
-        logger.info(f"Scraping Google News category '{category}' from URL: {url}")
-        articles_from_cat = _scrape_google_news_page(url, language, limit)
-        all_articles.extend(articles_from_cat)
+        if category in google_news_categories:
+            url = google_news_categories[category]
+            logger.info(f"Scraping Google News category '{category}' from URL: {url}")
+            articles_from_cat = _scrape_google_news_page(url, language, limit)
+            logger.info(f"Found {len(articles_from_cat)} articles from category '{category}'")
+            all_articles.extend(articles_from_cat)
+        else:
+            logger.warning(f"Category '{category}' not found in available categories")
 
+    logger.info(f"Total articles found across all categories: {len(all_articles)}")
+    
+    # Sort by published_at (most recent first)
     all_articles.sort(key=lambda x: x.get('published_at', ''), reverse=True)
     final_articles = all_articles[:limit]
     
-    meta = {"totalArticles": len(final_articles), "note": "Scraped from Google News. May be unstable."}
+    logger.info(f"Returning {len(final_articles)} articles after sorting and limiting")
+    
+    meta = {
+        "totalArticles": len(final_articles), 
+        "categoriesProcessed": selected_cats,
+        "availableCategories": list(google_news_categories.keys()),
+        "note": "Scraped from Google News. May be unstable."
+    }
     return final_articles, meta 
