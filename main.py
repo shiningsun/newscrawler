@@ -10,13 +10,14 @@ from config import THENEWSAPI_TOKEN, GNEWS_API_KEY, NYTIMES_API_KEY, HOST, PORT
 from services.news_service import NewsService
 from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db, create_tables, Article
-from sqlalchemy import select, or_, func
+from sqlalchemy import select, or_, func, and_
 import os
 import logging
 import traceback
 from services.apis.google_news_crawler import fetch_googlenews_articles
 from utils.url_utils import is_domain_excluded
 from urllib.parse import urlparse
+import re
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -225,34 +226,44 @@ async def crawl_google_news(
 
 @app.get("/search")
 async def search_articles(
-    q: str = Query(..., description="Search query - keywords to search for in article titles, descriptions, and content"),
+    q: str = Query(..., description="Comma-delimited search keywords. Articles must contain all keywords in titles, descriptions, or content."),
     limit: int = Query(20, description="Maximum number of articles to return (default: 20)"),
     offset: int = Query(0, description="Number of articles to skip for pagination (default: 0)"),
     db: AsyncSession = Depends(get_db)
 ) -> Dict:
     """
     Search articles in the database for keywords in titles, descriptions, and content.
-    Returns articles that contain the search query (case-insensitive).
+    The 'q' parameter can be a comma-delimited list of keywords.
+    Returns articles that contain ALL specified keywords as whole words (case-insensitive).
     Only articles with content length of at least 800 characters are considered.
     """
     try:
-        if not q.strip():
-            raise HTTPException(status_code=400, detail="Search query 'q' parameter is required")
-        
-        # Create search query using SQL LIKE for case-insensitive search
-        search_term = f"%{q.strip()}%"
-        
-        # Search in title, description, content, and author fields
-        # Also filter out articles with content length less than 800 characters
-        stmt = select(Article).where(
-            or_(
-                func.lower(Article.title).like(func.lower(search_term)),
-                func.lower(Article.description).like(func.lower(search_term)),
-                func.lower(Article.content).like(func.lower(search_term)),
-                func.lower(Article.author).like(func.lower(search_term))
-            ),
-            func.length(Article.content) >= 800
-        ).order_by(Article.published_at.desc()).offset(offset).limit(limit)
+        keywords = [kw.strip() for kw in q.split(',') if kw.strip()]
+        if not keywords:
+            raise HTTPException(status_code=400, detail="Search query 'q' parameter must contain at least one keyword.")
+
+        # Build a list of conditions, one for each keyword.
+        # An article must satisfy ALL of these conditions.
+        all_keyword_conditions = []
+        for keyword in keywords:
+            # Create a regex pattern for whole-word, case-insensitive search
+            # \y is the word boundary marker in PostgreSQL
+            search_pattern = fr"\y{re.escape(keyword)}\y"
+            
+            # For a single keyword, it can be in any of the specified fields.
+            single_keyword_condition = or_(
+                Article.title.op("~*")(search_pattern),
+                Article.description.op("~*")(search_pattern),
+                Article.content.op("~*")(search_pattern),
+                Article.author.op("~*")(search_pattern)
+            )
+            all_keyword_conditions.append(single_keyword_condition)
+
+        # Combine all conditions with AND.
+        # Also filter out articles with content length less than 800 characters.
+        query_conditions = and_(*all_keyword_conditions, func.length(Article.content) >= 800)
+
+        stmt = select(Article).where(query_conditions).order_by(Article.published_at.desc()).offset(offset).limit(limit)
         
         result = await db.execute(stmt)
         articles = result.scalars().all()
@@ -279,16 +290,9 @@ async def search_articles(
             }
             article_list.append(article_dict)
         
-        # Get total count for pagination info (also filtering by content length)
-        count_stmt = select(func.count(Article.id)).where(
-            or_(
-                func.lower(Article.title).like(func.lower(search_term)),
-                func.lower(Article.description).like(func.lower(search_term)),
-                func.lower(Article.content).like(func.lower(search_term)),
-                func.lower(Article.author).like(func.lower(search_term))
-            ),
-            func.length(Article.content) >= 800
-        )
+        # Get total count for pagination info using the same conditions
+        count_stmt = select(func.count(Article.id)).where(query_conditions)
+        
         count_result = await db.execute(count_stmt)
         total_count = count_result.scalar()
         
