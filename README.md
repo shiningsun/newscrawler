@@ -180,6 +180,26 @@ POST /crawlnews
 curl -X POST "http://localhost:8000/crawlnews?categories=technology,world&search=AI&limit=5"
 ```
 
+### 5. Search Articles
+```
+GET /search
+```
+
+**Parameters:**
+- `q`: Search query (keywords to search for in article titles, descriptions, content, and author)
+- `limit`: Maximum number of articles to return (default: 20)
+- `offset`: Number of articles to skip for pagination (default: 0)
+
+**Behavior:**
+- Returns articles that contain the search query (case-insensitive) in the title, description, content, or author fields.
+- Only articles with content length of at least 800 characters are considered.
+- Results are ordered by most recent `published_at`.
+
+**Example:**
+```bash
+curl "http://localhost:8000/search?q=AI&limit=10&offset=0"
+```
+
 ## Google News Crawler
 
 The Google News crawler provides:
