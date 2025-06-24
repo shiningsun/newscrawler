@@ -8,6 +8,7 @@ from sqlalchemy import select
 from database import Article
 import logging
 import re
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -219,11 +220,13 @@ async def get_or_extract_article_content(url: str, db_session: AsyncSession, for
                     'summary': cached_article.summary,
                     'author': cached_article.author,
                     'url': cached_article.url,
+                    'domain': cached_article.domain,
                     'error': cached_article.extraction_error
                 }, 'cache'
         
         # Extract from web
         extracted_data = extract_article_content(url)
+        final_url = extracted_data.get('url') or url
         
         # Save to database
         stmt = select(Article).where(Article.url == url)
@@ -236,15 +239,19 @@ async def get_or_extract_article_content(url: str, db_session: AsyncSession, for
             existing_article.summary = extracted_data.get('summary')
             existing_article.author = extracted_data.get('author')
             existing_article.extraction_error = extracted_data.get('error')
+            # Update domain if not already set
+            if not existing_article.domain and final_url:
+                existing_article.domain = urlparse(final_url).netloc
         else:
             # Create new article entry
             new_article = Article(
-                url=url,
+                url=final_url,
                 title=extracted_data.get('title', ''),
                 content=extracted_data.get('content'),
                 summary=extracted_data.get('summary'),
                 author=extracted_data.get('author'),
-                extraction_error=extracted_data.get('error')
+                extraction_error=extracted_data.get('error'),
+                domain=urlparse(final_url).netloc
             )
             db_session.add(new_article)
         

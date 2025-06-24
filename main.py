@@ -15,6 +15,8 @@ import os
 import logging
 import traceback
 from services.apis.google_news_crawler import fetch_googlenews_articles
+from utils.url_utils import is_domain_excluded
+from urllib.parse import urlparse
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -164,8 +166,18 @@ async def crawl_google_news(
         # Upsert articles into SQL database
         for article_data in substantial_articles:
             try:
+                # Skip if domain is excluded
+                url = article_data.get('url')
+                if is_domain_excluded(url):
+                    logger.info(f"Skipping article from excluded domain: {url}")
+                    continue
+
+                # Add domain to article_data
+                if url:
+                    article_data['domain'] = urlparse(url).netloc
+
                 # Check if article already exists
-                stmt = select(Article).where(Article.url == article_data['url'])
+                stmt = select(Article).where(Article.url == url)
                 result = await db.execute(stmt)
                 existing_article = result.scalar_one_or_none()
                 

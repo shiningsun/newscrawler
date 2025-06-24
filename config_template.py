@@ -18,4 +18,18 @@ GUARDIAN_API_KEY = "your_guardian_api_key_here"  # <-- Add your Guardian API key
 
 # Server Configuration
 HOST = "0.0.0.0"
-PORT = 8000 
+PORT = 8000
+
+# Example: "postgresql+asyncpg://user:password@host:port/dbname"
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:password@localhost:5432/news_db")
+
+# --- Domain Exclusion ---
+# List of domains to exclude from crawling and processing.
+# Subdomains will also be excluded (e.g., 'youtube.com' will also exclude 'music.youtube.com').
+EXCLUDED_DOMAINS = [
+    "youtube.com",
+    "twitter.com",
+    "facebook.com",
+    "instagram.com",
+    "reddit.com",
+] 

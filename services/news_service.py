@@ -2,6 +2,8 @@ from typing import Optional, Dict, List
 from datetime import datetime, timedelta
 from services.apis.news_sources import fetch_thenewsapi_articles, fetch_gnews_articles, fetch_nytimes_articles, fetch_guardian_articles
 from utils.article_extractor import get_or_extract_article_content
+from utils.url_utils import is_domain_excluded
+from urllib.parse import urlparse
 import requests
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
@@ -60,8 +62,18 @@ class NewsService:
                 # Process and save each article immediately
                 for article_data in articles:
                     try:
+                        # Skip if domain is excluded
+                        url = article_data.get('url')
+                        if is_domain_excluded(url):
+                            logger.info(f"Skipping article from excluded domain: {url}")
+                            continue
+
+                        # Add domain to article_data
+                        if url:
+                            article_data['domain'] = urlparse(url).netloc
+
                         # Check if article already exists
-                        stmt = select(Article).where(Article.url == article_data['url'])
+                        stmt = select(Article).where(Article.url == url)
                         result = await self.db_session.execute(stmt)
                         existing_article = result.scalar_one_or_none()
                         
@@ -95,19 +107,6 @@ class NewsService:
                                             'extraction_error': extracted_content.get('error')
                                         })
                                         
-                                        # Update the database with extracted content immediately
-                                        stmt = select(Article).where(Article.url == url)
-                                        result = await self.db_session.execute(stmt)
-                                        db_article = result.scalar_one_or_none()
-                                        
-                                        if db_article:
-                                            db_article.content = extracted_content.get('content')
-                                            db_article.summary = extracted_content.get('summary')
-                                            db_article.author = extracted_content.get('author')
-                                            db_article.extraction_error = extracted_content.get('error')
-                                            db_article.updated_at = datetime.utcnow()
-                                            
-                                        await self.db_session.commit()
                                 except Exception as e:
                                     logger.error(f"Error extracting content for {url}: {e}")
                                     article_data['extraction_error'] = str(e)
