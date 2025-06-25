@@ -1,6 +1,18 @@
+#!/usr/bin/env python3
+"""
+Script to add domain column to the articles table.
+"""
+
+import sys
+import os
+
+# Add the project root to the path (parent directory of scripts)
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from database import AsyncSessionLocal
+
 import asyncio
 import asyncpg
-import os
 import logging
 
 # Set up logging

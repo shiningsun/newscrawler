@@ -8,6 +8,12 @@ import asyncio
 import asyncpg
 import os
 import json
+import sys
+
+# Add the project root to the path (parent directory of scripts)
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from database import AsyncSessionLocal, Article
 
 async def force_fix_database_schema():
     """Force fix the database schema by recreating columns if necessary"""

@@ -6,8 +6,8 @@ Test script to demonstrate logging configuration with the Google News crawler.
 import sys
 import os
 
-# Add the project root to the path
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# Add the project root to the path (parent directory of scripts)
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from logging_config import setup_logging, get_logger
 from services.apis.google_news_crawler import fetch_googlenews_articles

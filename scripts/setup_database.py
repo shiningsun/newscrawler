@@ -8,10 +8,10 @@ import asyncio
 import os
 import sys
 
-# Add the project root to the path
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# Add the project root to the path (parent directory of scripts)
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from database import create_tables, engine, get_db
+from database import create_tables, engine, get_db, drop_tables
 from sqlalchemy import text
 import logging
 

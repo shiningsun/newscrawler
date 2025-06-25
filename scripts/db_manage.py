@@ -9,8 +9,8 @@ import os
 import sys
 from datetime import datetime, timedelta
 
-# Add the project root to the path
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# Add the project root to the path (parent directory of scripts)
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from database import AsyncSessionLocal, Article, create_tables, drop_tables
 from sqlalchemy import select, delete, func

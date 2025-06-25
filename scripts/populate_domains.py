@@ -1,6 +1,18 @@
+#!/usr/bin/env python3
+"""
+Script to populate domain column for existing articles.
+"""
+
+import sys
+import os
+
+# Add the project root to the path (parent directory of scripts)
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from database import AsyncSessionLocal, Article
+
 import asyncio
 import asyncpg
-import os
 from urllib.parse import urlparse
 import logging
 

@@ -152,6 +152,7 @@ async def extract_articles_from_news(
 async def crawl_google_news(
     categories: Optional[str] = Query(None, description="Comma-separated list of Google News categories to crawl (e.g. 'us,world,technology'). If not provided, all available categories will be crawled."),
     language: str = Query("en", description="Language code (default: en)"),
+    limit: int = Query(100, description="Maximum number of articles to fetch from each category (default: 100)"),
     db: AsyncSession = Depends(get_db)
 ) -> Dict:
     """
@@ -164,7 +165,7 @@ async def crawl_google_news(
         if not categories:
             categories = "us,world,technology,business,entertainment,health,science,sports"
         
-        articles, meta = fetch_googlenews_articles(categories=categories, language=language, limit=100)
+        articles, meta = fetch_googlenews_articles(categories=categories, language=language, limit=limit)
         inserted, updated = 0, 0
         
         # Filter out articles with content < 1000 characters
@@ -228,6 +229,7 @@ async def crawl_google_news(
             "status": "success",
             "categories": categories,
             "language": language,
+            "limit": limit,
             "articles_processed": len(substantial_articles),
             "inserted": inserted,
             "updated": updated,

@@ -69,7 +69,7 @@ export NYTIMES_API_KEY="your_nytimes_api_key"
 
 4. Set up database tables:
 ```bash
-python setup_database.py
+python scripts/setup_database.py
 ```
 
 5. Run the application:
@@ -200,6 +200,33 @@ GET /search
 curl "http://localhost:8000/search?q=AI&limit=10&offset=0"
 ```
 
+## Scripts Directory
+
+The `scripts/` directory contains utility scripts for managing and testing the application:
+
+### Database Management
+- `db_manage.py` - Interactive database management utility
+- `setup_database.py` - Initialize database tables
+- `add_domain_column.py` - Add domain column to articles table
+- `populate_domains.py` - Populate domain column for existing articles
+- `remove_excluded_domains.py` - Remove articles from excluded domains
+- `force_fix_db_schema.py` - Force fix database schema issues
+
+### Testing Scripts
+- `test_logging.py` - Test logging configuration
+- `test_extractor.py` - Test article content extraction
+- `test_db_connection.py` - Test database connectivity
+
+### Usage
+All scripts are designed to be run from the project root directory:
+```bash
+python scripts/db_manage.py
+python scripts/test_logging.py
+python scripts/setup_database.py
+```
+
+For detailed documentation, see `scripts/README.md`.
+
 ## Google News Crawler
 
 The Google News crawler provides:
@@ -221,25 +248,6 @@ The Google News crawler provides:
 ### Database Configuration
 The application automatically creates tables on startup. For production, consider using Alembic for database migrations.
 
-## Database Management
-
-### Setup Database
-```bash
-python setup_database.py
-```
-
-### Database Management Tool
-```bash
-python db_manage.py
-```
-
-The database management tool provides:
-- Show database statistics
-- View recent articles
-- Search articles by title or content
-- Cleanup old articles
-- Reset database
-
 ## Development
 
 ### Project Structure
@@ -247,11 +255,15 @@ The database management tool provides:
 newsCrawler/
 ├── main.py                 # FastAPI application entry point
 ├── database.py            # SQLAlchemy database configuration
-├── setup_database.py      # Database setup script
-├── db_manage.py          # Database management utilities
+├── logging_config.py      # Logging configuration
 ├── requirements.txt       # Python dependencies
 ├── docker-compose.yml     # Docker services configuration
 ├── Dockerfile            # Application container
+├── scripts/              # Utility scripts
+│   ├── db_manage.py      # Database management utilities
+│   ├── setup_database.py # Database setup script
+│   ├── test_*.py         # Testing scripts
+│   └── README.md         # Scripts documentation
 ├── services/
 │   ├── news_service.py   # News service business logic
 │   └── apis/
@@ -274,7 +286,7 @@ newsCrawler/
    - Ensure PostgreSQL is running
    - Check DATABASE_URL format
    - Verify database exists
-   - Run `python setup_database.py` to create tables
+   - Run `python scripts/setup_database.py` to create tables
 
 2. **Google News Crawling Issues**
    - Google may block requests if too frequent
@@ -298,4 +310,4 @@ Once the service is running, you can access:
 
 ## License
 
-This project is licensed under the MIT License. 
+This project is licensed under the MIT License.
