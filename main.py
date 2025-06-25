@@ -23,15 +23,32 @@ import asyncio
 import sys
 from utils.network_utils import setup_asyncio_exception_handling
 from logging_config import setup_logging, get_logger
+from contextlib import asynccontextmanager
 
 # Initialize logging
 setup_logging(log_level="INFO", app_name="news_crawler")
 logger = get_logger(__name__)
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage startup and shutdown events."""
+    # Setup asyncio exception handling to suppress network warnings
+    setup_asyncio_exception_handling()
+    
+    # Create database tables
+    await create_tables()
+    logger.info("Database tables created successfully")
+    logger.info("Server startup complete. Watching for file changes...")
+    yield
+    # Shutdown logic goes here
+    logger.info("Server shutting down.")
+
+
 app = FastAPI(
     title="Python Service",
     description="A basic Python service using FastAPI",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # Configure CORS
@@ -42,16 +59,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-@app.on_event("startup")
-async def startup_event():
-    """Create database tables on startup and configure asyncio exception handling"""
-    # Setup asyncio exception handling to suppress network warnings
-    setup_asyncio_exception_handling()
-    
-    # Create database tables
-    await create_tables()
-    logger.info("Database tables created successfully")
 
 @app.get("/")
 async def root() -> Dict[str, str]:
@@ -148,7 +155,7 @@ async def extract_articles_from_news(
         logger.error(f"Error extracting articles: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error extracting articles: {str(e)}")
 
-@app.post("/crawlnews")
+@app.get("/crawlnews")
 async def crawl_google_news(
     categories: Optional[str] = Query(None, description="Comma-separated list of Google News categories to crawl (e.g. 'us,world,technology'). If not provided, all available categories will be crawled."),
     language: str = Query("en", description="Language code (default: en)"),
@@ -332,4 +339,6 @@ async def search_articles(
         raise HTTPException(status_code=500, detail=f"Error searching articles: {str(e)}")
 
 if __name__ == "__main__":
-    uvicorn.run(app, host=HOST, port=PORT) 
+    # Use an import string for app to enable reload
+    # This allows Uvicorn to re-import the application when changes are detected
+    uvicorn.run("main:app", host=HOST, port=PORT, reload=True) 
