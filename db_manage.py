@@ -15,6 +15,11 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from database import AsyncSessionLocal, Article, create_tables, drop_tables
 from sqlalchemy import select, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from logging_config import setup_logging, get_logger
+
+# Initialize logging
+setup_logging(log_level="INFO", app_name="db_manage")
+logger = get_logger(__name__)
 
 async def show_stats():
     """Show database statistics"""

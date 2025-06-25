@@ -13,6 +13,7 @@ from database import get_db, create_tables, Article, AsyncSessionLocal
 from sqlalchemy import select, or_, func, and_
 import os
 import logging
+import logging.handlers
 import traceback
 from services.apis.google_news_crawler import fetch_googlenews_articles
 from utils.url_utils import is_domain_excluded
@@ -21,10 +22,11 @@ import re
 import asyncio
 import sys
 from utils.network_utils import setup_asyncio_exception_handling
+from logging_config import setup_logging, get_logger
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Initialize logging
+setup_logging(log_level="INFO", app_name="news_crawler")
+logger = get_logger(__name__)
 
 app = FastAPI(
     title="Python Service",
