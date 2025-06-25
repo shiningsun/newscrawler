@@ -9,7 +9,7 @@ from utils.article_extractor import extract_article_content, extract_multiple_ar
 from config import THENEWSAPI_TOKEN, GNEWS_API_KEY, NYTIMES_API_KEY, HOST, PORT
 from services.news_service import NewsService
 from sqlalchemy.ext.asyncio import AsyncSession
-from database import get_db, create_tables, Article
+from database import get_db, create_tables, Article, AsyncSessionLocal
 from sqlalchemy import select, or_, func, and_
 import os
 import logging
@@ -18,6 +18,9 @@ from services.apis.google_news_crawler import fetch_googlenews_articles
 from utils.url_utils import is_domain_excluded
 from urllib.parse import urlparse
 import re
+import asyncio
+import sys
+from utils.network_utils import setup_asyncio_exception_handling
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -40,7 +43,11 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
-    """Create database tables on startup"""
+    """Create database tables on startup and configure asyncio exception handling"""
+    # Setup asyncio exception handling to suppress network warnings
+    setup_asyncio_exception_handling()
+    
+    # Create database tables
     await create_tables()
     logger.info("Database tables created successfully")
 
@@ -163,49 +170,56 @@ async def crawl_google_news(
         
         # Sort by published_at (most recent first)
         substantial_articles.sort(key=lambda x: x.get('published_at', ''), reverse=True)
-        
-        # Upsert articles into SQL database
-        for article_data in substantial_articles:
-            try:
-                # Skip if domain is excluded
-                url = article_data.get('url')
-                if is_domain_excluded(url):
-                    logger.info(f"Skipping article from excluded domain: {url}")
-                    continue
 
-                # Add domain to article_data
-                if url:
-                    article_data['domain'] = urlparse(url).netloc
+        # Semaphore to limit concurrency (e.g., 10 concurrent upserts)
+        semaphore = asyncio.Semaphore(10)
 
-                # Check if article already exists
-                stmt = select(Article).where(Article.url == url)
-                result = await db.execute(stmt)
-                existing_article = result.scalar_one_or_none()
-                
-                if existing_article:
-                    # Update existing article
-                    for key, value in article_data.items():
-                        if hasattr(existing_article, key):
-                            setattr(existing_article, key, value)
-                    existing_article.updated_at = datetime.utcnow()
-                    updated += 1
-                    logger.info(f"Updated existing article: {article_data.get('title', 'Unknown')[:50]}...")
-                else:
-                    # Create new article
-                    new_article = Article(**article_data)
-                    db.add(new_article)
-                    inserted += 1
-                    logger.info(f"Added new article: {article_data.get('title', 'Unknown')[:50]}...")
-                
-                # Commit after each article to avoid transaction issues
-                await db.commit()
-                
-            except Exception as e:
-                logger.error(f"Error processing article {article_data.get('url', 'Unknown URL')}: {e}")
-                # Rollback the session to prevent transaction issues
-                await db.rollback()
-                continue
-        
+        # Upsert logic for a single article
+        async def upsert_article(article_data):
+            nonlocal inserted, updated
+            async with semaphore:
+                try:
+                    # Create a new database session for this operation
+                    async with AsyncSessionLocal() as local_db:
+                        # Skip if domain is excluded
+                        url = article_data.get('url')
+                        if is_domain_excluded(url):
+                            logger.info(f"Skipping article from excluded domain: {url}")
+                            return
+
+                        # Add domain to article_data
+                        if url:
+                            article_data['domain'] = urlparse(url).netloc
+
+                        # Check if article already exists
+                        stmt = select(Article).where(Article.url == url)
+                        result = await local_db.execute(stmt)
+                        existing_article = result.scalar_one_or_none()
+                        
+                        if existing_article:
+                            # Update existing article
+                            for key, value in article_data.items():
+                                if hasattr(existing_article, key):
+                                    setattr(existing_article, key, value)
+                            existing_article.updated_at = datetime.utcnow()
+                            updated += 1
+                            logger.info(f"Updated existing article: {article_data.get('title', 'Unknown')[:50]}...")
+                        else:
+                            # Create new article
+                            new_article = Article(**article_data)
+                            local_db.add(new_article)
+                            inserted += 1
+                            logger.info(f"Added new article: {article_data.get('title', 'Unknown')[:50]}...")
+                        
+                        # Commit the local session
+                        await local_db.commit()
+                except Exception as e:
+                    logger.error(f"Error processing article {article_data.get('url', 'Unknown URL')}: {e}")
+                    return
+
+        # Run upserts concurrently
+        await asyncio.gather(*(upsert_article(article) for article in substantial_articles))
+
         logger.info(f"Successfully processed {inserted} new articles and {updated} updated articles")
         
         return {

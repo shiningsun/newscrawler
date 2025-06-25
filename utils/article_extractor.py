@@ -9,25 +9,159 @@ from database import Article
 import logging
 import re
 from urllib.parse import urlparse
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+from collections import defaultdict
+import threading
+
+# Import configuration
+try:
+    from scraping_config import SCRAPING_CONFIG, USER_AGENTS, REFERERS
+except ImportError:
+    # Fallback configuration if config file doesn't exist
+    SCRAPING_CONFIG = {
+        'min_delay': 1.0,
+        'max_delay': 3.0,
+        'domain_rate_limit': 2.0,
+        'timeout': 20,
+        '403_retry_delay': (5.0, 10.0),
+        '429_retry_delay': (10.0, 20.0),
+        'max_retries': 3,
+    }
+    USER_AGENTS = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0',
+    ]
+    REFERERS = [
+        'https://www.google.com/',
+        'https://www.bing.com/',
+    ]
 
 logger = logging.getLogger(__name__)
 
+# Configuration constants
+SCRAPING_CONFIG = {
+    'min_delay': 1.0,           # Minimum delay between requests (seconds)
+    'max_delay': 3.0,           # Maximum delay between requests (seconds)
+    'domain_rate_limit': 2.0,   # Minimum interval between requests to same domain (seconds)
+    'timeout': 20,              # Request timeout (seconds)
+    '403_retry_delay': (5.0, 10.0),  # Delay range after 403 error (seconds)
+    '429_retry_delay': (10.0, 20.0), # Delay range after 429 error (seconds)
+    'max_retries': 3,           # Maximum retries for failed requests
+}
+
+# More realistic and up-to-date user agents
 USER_AGENTS = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0',
-    'Mozilla/5.0 (X11; Linux x86_64; rv:89.0) Gecko/20100101 Firefox/89.0',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/120.0.0.0',
 ]
 
-def _get_random_headers():
-    return {
-        'User-Agent': random.choice(USER_AGENTS),
-        'Accept-Language': 'en-US,en;q=0.9',
+# Common referrers to make requests look more natural
+REFERERS = [
+    'https://www.google.com/',
+    'https://www.google.com/search?q=',
+    'https://www.bing.com/',
+    'https://duckduckgo.com/',
+    'https://www.reddit.com/',
+    'https://twitter.com/',
+    'https://www.facebook.com/',
+    'https://www.linkedin.com/',
+]
+
+# Rate limiter for domains
+class DomainRateLimiter:
+    def __init__(self):
+        self.domain_timestamps = defaultdict(list)
+        self.lock = threading.Lock()
+    
+    def can_request(self, domain: str, min_interval: float = None) -> bool:
+        """Check if we can make a request to this domain"""
+        if min_interval is None:
+            min_interval = SCRAPING_CONFIG['domain_rate_limit']
+            
+        with self.lock:
+            now = time.time()
+            # Remove old timestamps (older than 60 seconds)
+            self.domain_timestamps[domain] = [
+                ts for ts in self.domain_timestamps[domain] 
+                if now - ts < 60
+            ]
+            
+            if not self.domain_timestamps[domain]:
+                return True
+            
+            # Check if enough time has passed since last request
+            last_request = max(self.domain_timestamps[domain])
+            return (now - last_request) >= min_interval
+    
+    def record_request(self, domain: str):
+        """Record a request to this domain"""
+        with self.lock:
+            self.domain_timestamps[domain].append(time.time())
+
+# Global rate limiter instance
+rate_limiter = DomainRateLimiter()
+
+def _create_session():
+    """Create a requests session with retry logic and realistic headers"""
+    from utils.network_utils import create_robust_session
+    return create_robust_session()
+
+def _get_random_headers(url: str = None):
+    """Generate realistic headers for web scraping"""
+    user_agent = random.choice(USER_AGENTS)
+    referer = random.choice(REFERERS)
+    
+    # Add some randomness to make requests look more human
+    accept_language = random.choice([
+        'en-US,en;q=0.9',
+        'en-US,en;q=0.9,es;q=0.8',
+        'en-US,en;q=0.9,fr;q=0.8',
+        'en-GB,en;q=0.9',
+        'en-CA,en;q=0.9',
+    ])
+    
+    headers = {
+        'User-Agent': user_agent,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': accept_language,
         'Accept-Encoding': 'gzip, deflate, br',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-        'Referer': 'https://www.google.com/',
+        'Accept-Charset': 'utf-8',
+        'DNT': '1',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Cache-Control': 'max-age=0',
+        'Referer': referer,
     }
+    
+    # Add origin header if we have a referer
+    if referer:
+        parsed_referer = urlparse(referer)
+        headers['Origin'] = f"{parsed_referer.scheme}://{parsed_referer.netloc}"
+    
+    return headers
+
+def _add_random_delay():
+    """Add a random delay to simulate human behavior"""
+    # Random delay between configured min and max
+    delay = random.uniform(SCRAPING_CONFIG['min_delay'], SCRAPING_CONFIG['max_delay'])
+    time.sleep(delay)
+
+def _wait_for_domain_rate_limit(domain: str):
+    """Wait if necessary to respect rate limits for a domain"""
+    while not rate_limiter.can_request(domain):
+        time.sleep(0.5)  # Wait 0.5 seconds and check again
+    
+    rate_limiter.record_request(domain)
 
 def _clean_text(text: str) -> str:
     """
@@ -70,14 +204,34 @@ def _clean_text(text: str) -> str:
 
 def extract_article_content(url: str) -> Dict:
     """
-    Extract article content from a given URL.
+    Extract article content from a given URL with enhanced anti-detection measures.
     Returns a dictionary with extracted content, summary, author, and final URL.
     """
     try:
-        headers = _get_random_headers()
-        time.sleep(random.uniform(0.5, 1.5))  # Random delay to avoid being blocked
+        # Parse domain for rate limiting
+        parsed_url = urlparse(url)
+        domain = parsed_url.netloc
         
-        response = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
+        # Wait for domain rate limit
+        _wait_for_domain_rate_limit(domain)
+        
+        # Add random delay before request
+        _add_random_delay()
+        
+        # Create session with retry logic
+        session = _create_session()
+        
+        # Get realistic headers
+        headers = _get_random_headers(url)
+        
+        # Make the request
+        response = session.get(
+            url, 
+            headers=headers, 
+            timeout=SCRAPING_CONFIG['timeout'],  # Use configured timeout
+            allow_redirects=True,
+            stream=False  # Don't stream to avoid detection
+        )
         response.raise_for_status()
         
         # Get the final URL after redirects
@@ -90,7 +244,7 @@ def extract_article_content(url: str) -> Dict:
             soup = BeautifulSoup(response.content, 'html.parser')
         
         # Remove script and style elements
-        for script in soup(["script", "style"]):
+        for script in soup(["script", "style", "noscript"]):
             script.decompose()
         
         # Extract title
@@ -102,7 +256,10 @@ def extract_article_content(url: str) -> Dict:
             '[name="twitter:title"]',
             '.headline',
             '.title',
-            '#title'
+            '#title',
+            '.article-title',
+            '.post-title',
+            '.entry-title'
         ]
         
         for selector in title_selectors:
@@ -118,7 +275,7 @@ def extract_article_content(url: str) -> Dict:
         # Clean title
         title = _clean_text(title)
         
-        # Extract content
+        # Extract content with improved selectors
         content = ""
         content_selectors = [
             'article',
@@ -128,25 +285,31 @@ def extract_article_content(url: str) -> Dict:
             '.content',
             '.story-body',
             '.article-body',
+            '.post-body',
             'main',
-            '[role="main"]'
+            '[role="main"]',
+            '.article-text',
+            '.story-content',
+            '.article-main',
+            '.article__content',
+            '.post__content'
         ]
         
         for selector in content_selectors:
             content_elem = soup.select_one(selector)
             if content_elem:
                 # Remove unwanted elements
-                for unwanted in content_elem.select('script, style, nav, header, footer, .ad, .advertisement, .sidebar'):
+                for unwanted in content_elem.select('script, style, nav, header, footer, .ad, .advertisement, .sidebar, .comments, .social-share, .related-articles, .newsletter-signup'):
                     unwanted.decompose()
                 
                 content = content_elem.get_text(separator=' ', strip=True)
-                if len(content) > 100:  # Ensure we have substantial content
+                if len(content) > 200:  # Ensure we have substantial content
                     break
         
         # If no specific content area found, try to get main text
-        if not content or len(content) < 100:
+        if not content or len(content) < 200:
             # Remove navigation, headers, footers, etc.
-            for unwanted in soup.select('nav, header, footer, .nav, .header, .footer, .menu, .sidebar, .ad, .advertisement'):
+            for unwanted in soup.select('nav, header, footer, .nav, .header, .footer, .menu, .sidebar, .ad, .advertisement, .comments, .social-share'):
                 unwanted.decompose()
             
             # Get all paragraphs
@@ -156,7 +319,7 @@ def extract_article_content(url: str) -> Dict:
         # Clean content
         content = _clean_text(content)
         
-        # Extract author
+        # Extract author with improved selectors
         author = ""
         author_selectors = [
             '.author',
@@ -165,7 +328,12 @@ def extract_article_content(url: str) -> Dict:
             '[class*="author"]',
             '[class*="byline"]',
             '.writer',
-            '.reporter'
+            '.reporter',
+            '.journalist',
+            '.contributor',
+            '.article-author',
+            '.post-author',
+            '.entry-author'
         ]
         
         for selector in author_selectors:
@@ -190,6 +358,46 @@ def extract_article_content(url: str) -> Dict:
             'error': None
         }
         
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 403:
+            logger.warning(f"403 Forbidden for {url} - likely bot detection")
+            # Add extra delay for 403 errors to avoid further blocking
+            time.sleep(random.uniform(*SCRAPING_CONFIG['403_retry_delay']))
+        elif e.response.status_code == 429:
+            logger.warning(f"429 Too Many Requests for {url} - rate limited")
+            # Add longer delay for rate limiting
+            time.sleep(random.uniform(*SCRAPING_CONFIG['429_retry_delay']))
+        else:
+            logger.error(f"HTTP error {e.response.status_code} for {url}: {e}")
+        
+        return {
+            'title': '',
+            'content': '',
+            'summary': '',
+            'author': '',
+            'url': url,
+            'error': str(e)
+        }
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"Connection error for {url}: {e}")
+        return {
+            'title': '',
+            'content': '',
+            'summary': '',
+            'author': '',
+            'url': url,
+            'error': f'Connection error: {str(e)}'
+        }
+    except requests.exceptions.Timeout:
+        logger.error(f"Timeout error for {url}")
+        return {
+            'title': '',
+            'content': '',
+            'summary': '',
+            'author': '',
+            'url': url,
+            'error': 'Request timeout'
+        }
     except Exception as e:
         logger.error(f"Error extracting content from {url}: {e}")
         return {

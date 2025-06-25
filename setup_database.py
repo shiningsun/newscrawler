@@ -11,7 +11,7 @@ import sys
 # Add the project root to the path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from database import create_tables, engine
+from database import create_tables, engine, get_db
 from sqlalchemy import text
 import logging
 
@@ -40,6 +40,10 @@ async def setup_database():
         print("3. Ensure the database exists")
         print("4. Verify your PostgreSQL credentials")
         raise
+
+async def upsert_article(article_data):
+    async with get_db() as db:  # create a new session for each task
+        ...
 
 if __name__ == "__main__":
     print("News Crawler Database Setup")

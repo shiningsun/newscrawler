@@ -4,6 +4,7 @@ from config import THENEWSAPI_TOKEN, GNEWS_API_KEY, NYTIMES_API_KEY, GUARDIAN_AP
 from bs4 import BeautifulSoup
 import logging
 from typing import List, Dict, Optional
+from sqlalchemy.ext.asyncio import create_async_engine
 
 logger = logging.getLogger(__name__)
 
@@ -302,4 +303,10 @@ def fetch_googlenews_articles(categories: Optional[str] = None, language: str = 
     final_articles = all_articles[:limit]
     
     meta = {"totalArticles": len(final_articles), "note": "Scraped from Google News. May be unstable."}
-    return final_articles, meta 
+    return final_articles, meta
+
+engine = create_async_engine(
+    "postgresql+asyncpg://user:password@host/dbname",
+    pool_size=20,           # default is usually 5 or 10
+    max_overflow=10,        # allows extra connections above pool_size
+) 

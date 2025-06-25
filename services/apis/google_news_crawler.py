@@ -199,10 +199,15 @@ def _scrape_google_news_page(url: str, language: str, limit: int) -> List[Dict[s
     
     def parse_articles(soup):
         articles = []
-        for item in soup.find_all('article'):
+        logger.debug(f"Starting to parse articles from HTML with {len(soup.find_all('article'))} article elements")
+        
+        for i, item in enumerate(soup.find_all('article')):
+            logger.debug(f"Processing article {i+1}")
             title_elem = item.find('a', class_='gPFEn') or item.find('h3')
             if not title_elem:
+                logger.debug(f"Article {i+1}: No title element found, skipping")
                 continue
+                
             title = title_elem.get_text()
             relative_url = title_elem.get('href')
             article_url = 'https://news.google.com' + relative_url[1:] if relative_url and relative_url.startswith('./') else relative_url
@@ -211,6 +216,8 @@ def _scrape_google_news_page(url: str, language: str, limit: int) -> List[Dict[s
             time_elem = item.find('time', class_='hvbAAd')
             published_at_str = time_elem['datetime'] if time_elem and 'datetime' in time_elem.attrs else datetime.utcnow().isoformat()
             published_at = _parse_datetime(published_at_str)
+            
+            logger.debug(f"Article {i+1}: Title='{title[:50]}...', URL='{article_url}', Source='{source}'")
             
             if article_url:
                 try:
@@ -244,9 +251,13 @@ def _scrape_google_news_page(url: str, language: str, limit: int) -> List[Dict[s
                         'extraction_error': extracted_data.get('error')
                     }
                     articles.append(article_data)
+                    logger.debug(f"Successfully added article: {article_data['title'][:50]}...")
                 except Exception as e:
                     logger.warning(f"Failed to process or extract content from {article_url}: {e}")
+            else:
+                logger.debug(f"Article {i+1}: No article URL found, skipping")
 
+        logger.info(f"Parsed {len(articles)} articles successfully")
         return articles
 
     try:
@@ -256,27 +267,64 @@ def _scrape_google_news_page(url: str, language: str, limit: int) -> List[Dict[s
         soup = BeautifulSoup(response.content, 'html.parser')
         articles = parse_articles(soup)
         seen_urls = set(a['url'] for a in articles)
+        logger.info(f"Initial articles found: {len(articles)}")
 
+        # Look for full coverage links
+        full_coverage_count = 0
         for item in soup.find_all('article'):
             full_coverage_link = None
+            logger.debug(f"Checking article for full coverage link...")
+            
             for a in item.find_all('a'):
-                if a.text.strip().lower() == 'full coverage':
+                link_text = a.text.strip().lower()
+                logger.debug(f"Found link with text: '{link_text}'")
+                if link_text == 'full coverage':
                     full_coverage_link = a.get('href')
+                    logger.info(f"Found full coverage link: {full_coverage_link}")
                     break
-            if full_coverage_link and full_coverage_link.startswith('./articles/'):
-                fc_url = 'https://news.google.com' + full_coverage_link[1:]
-                try:
-                    time.sleep(random.uniform(0.5, 1.5))
-                    fc_resp = requests.get(fc_url, headers=headers, timeout=15)
-                    fc_resp.raise_for_status()
-                    fc_soup = BeautifulSoup(fc_resp.content, 'html.parser')
-                    fc_articles = parse_articles(fc_soup)
-                    for fc_article in fc_articles:
-                        if fc_article['url'] not in seen_urls:
-                            articles.append(fc_article)
-                            seen_urls.add(fc_article['url'])
-                except Exception as e:
-                    logger.warning(f"Failed to scrape Full Coverage page {fc_url}: {e}")
+            
+            if full_coverage_link:
+                if full_coverage_link.startswith('./articles/'):
+                    fc_url = 'https://news.google.com' + full_coverage_link[1:]
+                    logger.info(f"Processing full coverage URL: {fc_url}")
+                    full_coverage_count += 1
+                    
+                    try:
+                        time.sleep(random.uniform(0.5, 1.5))
+                        logger.info(f"Making request to full coverage page: {fc_url}")
+                        fc_resp = requests.get(fc_url, headers=headers, timeout=15)
+                        fc_resp.raise_for_status()
+                        logger.info(f"Successfully retrieved full coverage page, status: {fc_resp.status_code}")
+                        
+                        fc_soup = BeautifulSoup(fc_resp.content, 'html.parser')
+                        logger.info(f"Parsed full coverage page HTML, length: {len(fc_resp.content)}")
+                        
+                        fc_articles = parse_articles(fc_soup)
+                        logger.info(f"Found {len(fc_articles)} articles in full coverage page")
+                        
+                        new_articles_count = 0
+                        for fc_article in fc_articles:
+                            if fc_article['url'] not in seen_urls:
+                                articles.append(fc_article)
+                                seen_urls.add(fc_article['url'])
+                                new_articles_count += 1
+                                logger.info(f"Added new article from full coverage: {fc_article.get('title', 'No title')[:50]}...")
+                            else:
+                                logger.debug(f"Skipped duplicate article from full coverage: {fc_article.get('title', 'No title')[:50]}...")
+                        
+                        logger.info(f"Added {new_articles_count} new articles from full coverage page")
+                        
+                    except Exception as e:
+                        logger.warning(f"Failed to scrape Full Coverage page {fc_url}: {e}")
+                        logger.warning(f"Response status: {getattr(fc_resp, 'status_code', 'N/A') if 'fc_resp' in locals() else 'N/A'}")
+                        logger.warning(f"Response content length: {len(getattr(fc_resp, 'content', b'')) if 'fc_resp' in locals() else 0}")
+                else:
+                    logger.warning(f"Full coverage link doesn't start with './articles/': {full_coverage_link}")
+            else:
+                logger.debug("No full coverage link found in this article")
+
+        logger.info(f"Processed {full_coverage_count} full coverage links")
+        logger.info(f"Total articles after full coverage processing: {len(articles)}")
 
         return articles[:limit]
     except Exception as e:
@@ -305,11 +353,33 @@ def fetch_googlenews_articles(
         # Match requested categories with available categories
         selected_cats = []
         for requested_cat in requested_cats:
+            matched = False
+            # First try exact match
             for available_cat in google_news_categories.keys():
-                if requested_cat in available_cat or available_cat in requested_cat:
+                if requested_cat == available_cat:
                     selected_cats.append(available_cat)
-                    logger.info(f"Matched '{requested_cat}' to '{available_cat}'")
+                    logger.info(f"Exact match: '{requested_cat}' to '{available_cat}'")
+                    matched = True
                     break
+            
+            # If no exact match, try partial match but be more careful
+            if not matched:
+                for available_cat in google_news_categories.keys():
+                    # Only match if the requested category is a significant part of the available category
+                    # or if the available category is a significant part of the requested category
+                    # This prevents "business" from matching "us"
+                    if (len(requested_cat) >= 3 and requested_cat in available_cat) or \
+                       (len(available_cat) >= 3 and available_cat in requested_cat):
+                        # Additional check: make sure it's not a false positive
+                        # For example, "business" should not match "us" or "world"
+                        if not (requested_cat in ['us', 'world'] and available_cat in ['us', 'world']):
+                            selected_cats.append(available_cat)
+                            logger.info(f"Partial match: '{requested_cat}' to '{available_cat}'")
+                            matched = True
+                            break
+            
+            if not matched:
+                logger.warning(f"No match found for requested category: '{requested_cat}'")
         
         if not selected_cats:
             logger.warning(f"No matching categories found for: {requested_cats}. Using 'home' category.")
