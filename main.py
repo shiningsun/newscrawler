@@ -15,7 +15,7 @@ import os
 import logging
 import logging.handlers
 import traceback
-from services.apis.google_news_crawler import fetch_googlenews_articles
+from services.apis.google_news_crawler import fetch_googlenews_articles, getTopHeadlines
 from utils.url_utils import is_domain_excluded
 from urllib.parse import urlparse
 import re
@@ -159,7 +159,7 @@ async def extract_articles_from_news(
 async def crawl_google_news(
     categories: Optional[str] = Query(None, description="Comma-separated list of Google News categories to crawl (e.g. 'us,world,technology'). If not provided, all available categories will be crawled."),
     language: str = Query("en", description="Language code (default: en)"),
-    limit: int = Query(100, description="Maximum number of articles to fetch from each category (default: 100)"),
+    limit: int = Query(300, description="Maximum number of articles to fetch from each category (default: 300)"),
     db: AsyncSession = Depends(get_db)
 ) -> Dict:
     """
@@ -337,6 +337,32 @@ async def search_articles(
     except Exception as e:
         logger.error(f"Error in /search endpoint: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error searching articles: {str(e)}")
+
+@app.get("/headlines")
+async def get_top_headlines(
+    language: str = Query("en", description="Language code (default: en)"),
+    limit: int = Query(10, description="Maximum number of headline groups to return (default: 10)")
+) -> Dict:
+    """
+    Get top headlines from Google News homepage, grouped by related stories.
+    Returns a list of lists of headline titles from the 'Top stories' section.
+    Each sublist contains the titles of related stories as grouped on the page.
+    """
+    try:
+        logger.info(f"Fetching top headlines with language: {language}, limit: {limit}")
+        grouped_headlines = getTopHeadlines(language=language, limit=limit)
+        total_count = sum(len(group) for group in grouped_headlines)
+        return {
+            "status": "success",
+            "language": language,
+            "limit": limit,
+            "headlines_group_count": len(grouped_headlines),
+            "headlines_total_count": total_count,
+            "headlines_grouped": grouped_headlines
+        }
+    except Exception as e:
+        logger.error(f"Error in /headlines endpoint: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error fetching top headlines: {str(e)}")
 
 if __name__ == "__main__":
     # Use an import string for app to enable reload

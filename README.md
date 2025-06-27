@@ -200,6 +200,53 @@ GET /search
 curl "http://localhost:8000/search?q=AI&limit=10&offset=0"
 ```
 
+### 6. Get Headlines
+```
+GET /headlines
+```
+
+#### Description
+Returns the top news headlines from Google News, grouped by clusters as they appear on the "Top stories" page. Each group corresponds to a cluster of related stories (as grouped by Google News), and each group contains a list of headline titles.
+
+#### Query Parameters
+- `language` (string, default: "en"): Language code for the news (e.g., "en", "es").
+- `limit` (integer, default: 10): Maximum number of headline groups (clusters) to return.
+
+#### Response
+- `status`: "success" if the request was successful.
+- `language`: The language code used.
+- `limit`: The number of headline groups requested.
+- `headlines_group_count`: The number of headline groups returned.
+- `headlines_total_count`: The total number of headlines (sum of all groups).
+- `headlines_grouped`: A list of lists, where each sublist contains the titles of related stories in a group.
+
+#### Example Response
+```json
+{
+  "status": "success",
+  "language": "en",
+  "limit": 10,
+  "headlines_group_count": 10,
+  "headlines_total_count": 32,
+  "headlines_grouped": [
+    [
+      "Biden, Trump face off in first 2024 debate",
+      "Fact-checking the presidential debate"
+    ],
+    [
+      "Supreme Court rules on major abortion case"
+    ],
+    ...
+  ]
+}
+```
+
+#### Example Usage
+```
+GET /headlines?language=en&limit=5
+```
+Returns the first 5 headline groups in English.
+
 ## Scripts Directory
 
 The `scripts/` directory contains utility scripts for managing and testing the application:

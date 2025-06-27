@@ -331,6 +331,114 @@ def _scrape_google_news_page(url: str, language: str, limit: int) -> List[Dict[s
         logger.error(f"Error scraping Google News page {url}: {e}")
         return []
 
+def getTopHeadlines(language: str = "en", limit: int = 10) -> List[List[str]]:
+    """
+    Get top headlines from Google News 'Top stories' page, grouped by clusters under the Headlines section.
+    Each sublist contains the titles of related stories as grouped by c-wiz tags under the main Headlines c-wiz.
+    The limit parameter applies to the number of headline groups (clusters), not the total number of article titles.
+    """
+    try:
+        home_url = f"https://news.google.com/home?hl={language}&gl=US&ceid=US:{language}"
+        headers = _get_random_headers()
+        logger.info(f"Fetching Google News homepage: {home_url}")
+        time.sleep(random.uniform(0.5, 1.5))
+        response = requests.get(home_url, headers=headers, timeout=15)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+
+        # Step 1: Find the 'Top stories' link
+        top_stories_url = None
+        for a in soup.find_all('a', href=True):
+            href = a['href']
+            text = a.get_text().strip().lower()
+            if ('/topics/' in href or '/topstories' in href) and 'top stories' in text:
+                if href.startswith('./'):
+                    top_stories_url = 'https://news.google.com' + href[1:]
+                elif href.startswith('/'):
+                    top_stories_url = 'https://news.google.com' + href
+                elif href.startswith('http'):
+                    top_stories_url = href
+                else:
+                    top_stories_url = 'https://news.google.com/' + href
+                logger.info(f"Found Top stories link: {top_stories_url}")
+                break
+
+        if not top_stories_url:
+            logger.warning("Could not find 'Top stories' link on homepage. Falling back to homepage parsing.")
+            return _extract_headline_groups_from_headlines_section(soup, limit)
+
+        # Step 2: Request and parse the Top stories page
+        time.sleep(random.uniform(0.5, 1.5))
+        resp = requests.get(top_stories_url, headers=headers, timeout=15)
+        resp.raise_for_status()
+        top_soup = BeautifulSoup(resp.content, 'html.parser')
+        logger.info(f"Fetched Top stories page: {top_stories_url}")
+
+        # Step 3: Drill down to the Headlines section and group by child c-wiz tags
+        groups = _extract_headline_groups_from_headlines_section(top_soup, limit)
+        if groups:
+            return groups
+        else:
+            logger.warning("No headline groups found on Top stories page. Falling back to flat list.")
+            return _extract_headline_groups_from_headlines_section(top_soup, limit)
+    except Exception as e:
+        logger.error(f"Error fetching top headlines: {e}")
+        return []
+
+def _extract_headline_groups_from_headlines_section(soup, limit) -> List[List[str]]:
+    """
+    Drill down to the c-wiz under the Headlines header, then group by its direct child c-wiz tags.
+    The limit parameter applies to the number of headline groups (clusters) returned.
+    """
+    grouped_headlines = []
+    # 1. Find the Headlines header (div or h2/h3 with text 'Headlines')
+    headlines_header = None
+    for tag in soup.find_all(['div', 'h2', 'h3']):
+        if tag.get_text().strip().lower() == 'headlines':
+            headlines_header = tag
+            break
+    if not headlines_header:
+        return []
+    # 2. Find the main c-wiz container after the Headlines header
+    main_cwiz = None
+    # Try next siblings, or parent then find c-wiz
+    next_cwiz = headlines_header.find_next('c-wiz')
+    if next_cwiz:
+        main_cwiz = next_cwiz
+    else:
+        parent = headlines_header.parent
+        if parent:
+            main_cwiz = parent.find('c-wiz')
+    if not main_cwiz:
+        return []
+    # 3. For each direct child c-wiz of main_cwiz, extract headlines
+    for i, cluster in enumerate(main_cwiz.find_all('c-wiz', recursive=False)):
+        if i >= limit:
+            break
+        titles = []
+        title_selectors = [
+            'a[class*="gPFEn"]',
+            'h3',
+            'h2',
+            'h4',
+            'a[class*="title"]',
+            'a[class*="headline"]',
+            'a[class*="story"]',
+            'a[href*="/articles/"]',
+            'a[href*="news.google.com"]',
+        ]
+        for title_selector in title_selectors:
+            for title_elem in cluster.select(title_selector):
+                title_text = title_elem.get_text().strip()
+                if title_text:
+                    if ' - ' in title_text:
+                        title_text = title_text.rsplit(' - ', 1)[0].strip()
+                    if len(title_text) > 10 and title_text not in titles:
+                        titles.append(title_text)
+        if titles:
+            grouped_headlines.append(titles)
+    return grouped_headlines
+
 def fetch_googlenews_articles(
     categories: Optional[str] = None,
     language: str = "en",
