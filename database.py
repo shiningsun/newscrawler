@@ -42,6 +42,20 @@ class Article(Base):
     created_at = Column(DateTime, default=get_utc_now)
     updated_at = Column(DateTime, default=get_utc_now, onupdate=get_utc_now)
 
+class Transcript(Base):
+    __tablename__ = "transcript"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String(5000), nullable=True)
+    url = Column(String(5000), unique=True, index=True, nullable=False)
+    published_date = Column(DateTime)
+    content = Column(Text, nullable=False)
+    author = Column(String(2000))
+    domain = Column(String(255), index=True, nullable=True)
+    category = Column(String(255), index=True, nullable=True)
+    created_at = Column(DateTime, default=get_utc_now)
+    updated_at = Column(DateTime, default=get_utc_now, onupdate=get_utc_now)
+
 # Dependency to get database session
 async def get_db():
     async with AsyncSessionLocal() as session:

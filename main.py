@@ -9,7 +9,7 @@ from utils.article_extractor import extract_article_content, extract_multiple_ar
 from config import THENEWSAPI_TOKEN, GNEWS_API_KEY, NYTIMES_API_KEY, HOST, PORT
 from services.news_service import NewsService
 from sqlalchemy.ext.asyncio import AsyncSession
-from database import get_db, create_tables, Article, AsyncSessionLocal
+from database import get_db, create_tables, Article, Transcript, AsyncSessionLocal
 from sqlalchemy import select, or_, func, and_
 import os
 import logging
@@ -24,6 +24,11 @@ import sys
 from utils.network_utils import setup_asyncio_exception_handling
 from logging_config import setup_logging, get_logger
 from contextlib import asynccontextmanager
+from pydantic import BaseModel
+from typing import Optional as OptionalType
+from bs4 import BeautifulSoup
+import dateutil.parser
+from utils.youtube_extractor import extract_youtube_metadata
 
 # Initialize logging
 setup_logging(log_level="INFO", app_name="news_crawler")
@@ -363,6 +368,159 @@ async def get_top_headlines(
     except Exception as e:
         logger.error(f"Error in /headlines endpoint: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error fetching top headlines: {str(e)}")
+
+# Pydantic model for transcript creation
+class TranscriptCreate(BaseModel):
+    url: str
+    content: str
+
+@app.post("/transcript")
+async def upsert_transcript(
+    transcript_data: TranscriptCreate,
+    db: AsyncSession = Depends(get_db)
+) -> Dict:
+    """
+    Upsert a transcript into the database.
+    Crawls the YouTube URL to extract title, author, and published_date. Uses provided content.
+    If a transcript with the same URL already exists, it will be updated.
+    Otherwise, a new transcript will be created.
+    """
+    try:
+        # Extract domain from URL
+        domain = urlparse(transcript_data.url).netloc
+
+        # Crawl the YouTube URL for metadata
+        youtube_info = extract_youtube_metadata(transcript_data.url)
+        title = youtube_info.get("title") or None
+        author = youtube_info.get("author") or None
+        published_date = youtube_info.get("published_date")
+
+        # Check if transcript already exists
+        stmt = select(Transcript).where(Transcript.url == transcript_data.url)
+        result = await db.execute(stmt)
+        existing_transcript = result.scalar_one_or_none()
+        
+        if existing_transcript:
+            # Update existing transcript
+            existing_transcript.title = title
+            existing_transcript.author = author
+            existing_transcript.published_date = published_date
+            existing_transcript.content = transcript_data.content
+            existing_transcript.domain = domain
+            existing_transcript.updated_at = datetime.utcnow()
+            action = "updated"
+            title_preview = title[:50] + "..." if title else "No title"
+            logger.info(f"Updated existing transcript: {title_preview}")
+        else:
+            # Create new transcript
+            new_transcript = Transcript(
+                title=title,
+                url=transcript_data.url,
+                published_date=published_date,
+                content=transcript_data.content,
+                author=author,
+                domain=domain,
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+            )
+            db.add(new_transcript)
+            action = "created"
+            title_preview = title[:50] + "..." if title else "No title"
+            logger.info(f"Created new transcript: {title_preview}")
+        
+        await db.commit()
+        
+        return {
+            "status": "success",
+            "action": action,
+            "title": title,
+            "author": author,
+            "published_date": published_date.isoformat() if published_date else None,
+            "url": transcript_data.url,
+            "domain": domain,
+            "youtube_metadata": {
+                "description": youtube_info.get("description", ""),
+                "view_count": youtube_info.get("view_count", ""),
+                "like_count": youtube_info.get("like_count", ""),
+                "error": youtube_info.get("error")
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in /transcript endpoint: {traceback.format_exc()}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error upserting transcript: {str(e)}")
+
+@app.get("/transcripts")
+async def get_transcripts(
+    limit: int = Query(20, description="Maximum number of transcripts to return (default: 20)"),
+    offset: int = Query(0, description="Number of transcripts to skip for pagination (default: 0)"),
+    category: Optional[str] = Query(None, description="Filter by category"),
+    domain: Optional[str] = Query(None, description="Filter by domain"),
+    db: AsyncSession = Depends(get_db)
+) -> Dict:
+    """
+    Retrieve transcripts from the database with optional filtering and pagination.
+    """
+    try:
+        # Build query with optional filters
+        query = select(Transcript)
+        
+        if category:
+            query = query.where(Transcript.category == category)
+        
+        if domain:
+            query = query.where(Transcript.domain == domain)
+        
+        # Add ordering and pagination
+        query = query.order_by(Transcript.published_date.desc()).offset(offset).limit(limit)
+        
+        result = await db.execute(query)
+        transcripts = result.scalars().all()
+        
+        # Convert SQLAlchemy objects to dictionaries
+        transcript_list = []
+        for transcript in transcripts:
+            transcript_dict = {
+                "id": transcript.id,
+                "title": transcript.title,
+                "url": transcript.url,
+                "published_date": transcript.published_date.isoformat() if transcript.published_date else None,
+                "content": transcript.content,
+                "author": transcript.author,
+                "domain": transcript.domain,
+                "category": transcript.category,
+                "created_at": transcript.created_at.isoformat() if transcript.created_at else None,
+                "updated_at": transcript.updated_at.isoformat() if transcript.updated_at else None
+            }
+            transcript_list.append(transcript_dict)
+        
+        # Get total count for pagination info
+        count_query = select(func.count(Transcript.id))
+        if category:
+            count_query = count_query.where(Transcript.category == category)
+        if domain:
+            count_query = count_query.where(Transcript.domain == domain)
+        
+        count_result = await db.execute(count_query)
+        total_count = count_result.scalar()
+        
+        return {
+            "status": "success",
+            "total_results": total_count,
+            "limit": limit,
+            "offset": offset,
+            "transcripts_found": len(transcript_list),
+            "filters": {
+                "category": category,
+                "domain": domain
+            },
+            "transcripts": transcript_list
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in /transcripts endpoint: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error retrieving transcripts: {str(e)}")
 
 if __name__ == "__main__":
     # Use an import string for app to enable reload
