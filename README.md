@@ -166,18 +166,40 @@ curl "http://localhost:8000/extract-articles?limit=3&delay=2.0"
 
 ### 4. Crawl Google News
 ```
-POST /crawlnews
+GET /crawlnews
 ```
 
 **Parameters:**
-- `categories`: Comma-separated list of Google News categories
+- `categories`: Comma-separated list of Google News categories to crawl (e.g. 'us,world,technology'). If not provided, all available categories will be crawled.
 - `language`: Language code (default: "en")
-- `search`: Keyword(s) to filter articles
-- `limit`: Maximum number of articles (default: 10)
+- `limit`: Maximum number of articles to fetch from each category (default: 300)
+
+**Behavior:**
+- Crawls Google News for the specified categories and language.
+- Only articles with content of at least 1000 characters are processed and stored.
+- If no categories are specified, all available categories will be crawled.
+- The response includes the number of articles processed, how many were inserted or updated, and meta information.
 
 **Example:**
 ```bash
-curl -X POST "http://localhost:8000/crawlnews?categories=technology,world&search=AI&limit=5"
+curl "http://localhost:8000/crawlnews?categories=technology,world&limit=5"
+```
+
+**Response Example:**
+```json
+{
+  "status": "success",
+  "categories": "technology,world",
+  "language": "en",
+  "limit": 5,
+  "articles_processed": 5,
+  "inserted": 3,
+  "updated": 2,
+  "meta": { "totalArticles": 5, "note": "Scraped from Google News. May be unstable." },
+  "articles": [
+    { "title": "...", "url": "...", ... }
+  ]
+}
 ```
 
 ### 5. Search Articles
