@@ -113,7 +113,7 @@ def extract_youtube_metadata(url: str) -> Dict:
         session = requests.Session()
         session.headers.update(_get_random_headers())
         
-        # Make the request
+        # Make the request with better encoding handling
         response = session.get(
             url, 
             timeout=YOUTUBE_CONFIG['timeout'],
@@ -121,10 +121,14 @@ def extract_youtube_metadata(url: str) -> Dict:
         )
         response.raise_for_status()
         
+        # Try to detect encoding properly
+        if response.encoding == 'ISO-8859-1':
+            response.encoding = 'utf-8'
+        
         # Parse with BeautifulSoup
         soup = BeautifulSoup(response.content, 'html.parser')
         
-        # Extract title
+        # Extract title with multiple approaches
         title = _extract_title(soup, response.text)
         
         # Extract author/channel name
@@ -217,21 +221,42 @@ def _extract_title(soup: BeautifulSoup, html_text: str) -> str:
     """Extract video title from YouTube page"""
     title = ""
     
-    # Try meta tags first
+    # Try the new YouTube structure first
     title_selectors = [
-        'meta[property="og:title"]',
-        'meta[name="title"]',
-        'meta[property="twitter:title"]',
+        'ytd-watch-metadata yt-formatted-string',
+        'ytd-watch-metadata h1 yt-formatted-string',
+        'ytd-watch-metadata #title h1 yt-formatted-string',
+        'ytd-watch-metadata #title',
+        'ytd-watch-metadata h1',
+        'yt-formatted-string[class*="title"]',
+        'h1 yt-formatted-string',
+        'h1.ytd-video-primary-info-renderer',
+        'h1.ytd-watch-metadata',
     ]
     
     for selector in title_selectors:
         title_elem = soup.select_one(selector)
         if title_elem:
-            title = title_elem.get('content', '').strip()
+            title = title_elem.get_text().strip()
             if title:
                 break
     
-    # Try title tag
+    # Try meta tags as fallback
+    if not title:
+        meta_selectors = [
+            'meta[property="og:title"]',
+            'meta[name="title"]',
+            'meta[property="twitter:title"]',
+        ]
+        
+        for selector in meta_selectors:
+            title_elem = soup.select_one(selector)
+            if title_elem:
+                title = title_elem.get('content', '').strip()
+                if title:
+                    break
+    
+    # Try title tag as last resort
     if not title:
         title_tag = soup.find('title')
         if title_tag:
@@ -239,12 +264,23 @@ def _extract_title(soup: BeautifulSoup, html_text: str) -> str:
             # Remove " - YouTube" suffix
             title = title.replace(' - YouTube', '')
     
-    # Try regex pattern from page source
+    # Try regex patterns from page source
     if not title:
         try:
-            title_match = re.search(r'"title":"([^"]+)"', html_text)
-            if title_match:
-                title = title_match.group(1)
+            # Look for title in various JSON patterns
+            patterns = [
+                r'"title":"([^"]+)"',
+                r'"videoTitle":"([^"]+)"',
+                r'"name":"([^"]+)"',
+                r'"text":"([^"]+)"',
+            ]
+            for pattern in patterns:
+                title_match = re.search(pattern, html_text)
+                if title_match:
+                    title = title_match.group(1)
+                    # Clean up any HTML entities
+                    title = title.replace('\\u0026', '&').replace('\\/', '/')
+                    break
         except Exception:
             pass
     
@@ -254,19 +290,40 @@ def _extract_author(soup: BeautifulSoup, html_text: str) -> str:
     """Extract channel name/author from YouTube page"""
     author = ""
     
-    # Try meta tags
+    # Try the new YouTube structure first
     author_selectors = [
-        'meta[name="author"]',
-        'meta[property="og:site_name"]',
-        'link[rel="author"]',
+        'ytd-watch-metadata ytd-channel-name a',
+        'ytd-watch-metadata ytd-channel-name yt-formatted-string',
+        'ytd-watch-metadata #channel-name a',
+        'ytd-watch-metadata #owner-name a',
+        'ytd-channel-name a',
+        'ytd-channel-name yt-formatted-string',
+        'a.ytd-channel-name',
+        'yt-formatted-string[class*="channel"]',
+        'yt-formatted-string[class*="owner"]',
     ]
     
     for selector in author_selectors:
         author_elem = soup.select_one(selector)
         if author_elem:
-            author = author_elem.get('content', author_elem.get('href', '')).strip()
+            author = author_elem.get_text().strip()
             if author:
                 break
+    
+    # Try meta tags as fallback
+    if not author:
+        meta_selectors = [
+            'meta[name="author"]',
+            'meta[property="og:site_name"]',
+            'link[rel="author"]',
+        ]
+        
+        for selector in meta_selectors:
+            author_elem = soup.select_one(selector)
+            if author_elem:
+                author = author_elem.get('content', author_elem.get('href', '')).strip()
+                if author:
+                    break
     
     # Try regex patterns from page source
     if not author:
@@ -276,11 +333,15 @@ def _extract_author(soup: BeautifulSoup, html_text: str) -> str:
                 r'"author":"([^"]+)"',
                 r'"channelName":"([^"]+)"',
                 r'"ownerChannelName":"([^"]+)"',
+                r'"ownerName":"([^"]+)"',
+                r'"channel":"([^"]+)"',
             ]
             for pattern in patterns:
                 author_match = re.search(pattern, html_text)
                 if author_match:
                     author = author_match.group(1)
+                    # Clean up any HTML entities
+                    author = author.replace('\\u0026', '&').replace('\\/', '/')
                     break
         except Exception:
             pass
@@ -368,16 +429,21 @@ def _extract_view_count(html_text: str) -> str:
     view_count = ""
     
     try:
-        # Look for view count patterns
+        # Look for view count patterns in the page source
         patterns = [
             r'"viewCount":"(\d+)"',
             r'"view_count":"(\d+)"',
+            r'"views":"(\d+)"',
+            r'"viewCountText":"([^"]+)"',
             r'(\d+(?:,\d+)*)\s+views',
+            r'(\d+(?:,\d+)*)\s+view',
         ]
         for pattern in patterns:
             view_match = re.search(pattern, html_text)
             if view_match:
                 view_count = view_match.group(1)
+                # Clean up any formatting
+                view_count = view_count.replace(',', '')
                 break
     except Exception:
         pass
@@ -389,16 +455,21 @@ def _extract_like_count(html_text: str) -> str:
     like_count = ""
     
     try:
-        # Look for like count patterns
+        # Look for like count patterns in the page source
         patterns = [
             r'"likeCount":"(\d+)"',
             r'"like_count":"(\d+)"',
+            r'"likes":"(\d+)"',
+            r'"likeCountText":"([^"]+)"',
             r'(\d+(?:,\d+)*)\s+likes',
+            r'(\d+(?:,\d+)*)\s+like',
         ]
         for pattern in patterns:
             like_match = re.search(pattern, html_text)
             if like_match:
                 like_count = like_match.group(1)
+                # Clean up any formatting
+                like_count = like_count.replace(',', '')
                 break
     except Exception:
         pass

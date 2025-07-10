@@ -11,6 +11,67 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from utils.youtube_extractor import extract_youtube_metadata
 import json
+import requests
+from bs4 import BeautifulSoup
+
+def debug_youtube_structure():
+    """Debug function to inspect YouTube page structure"""
+    
+    url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    
+    print("=== Debugging YouTube Page Structure ===\n")
+    
+    try:
+        # Make a simple request
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+        
+        response = requests.get(url, headers=headers, timeout=15)
+        response.raise_for_status()
+        
+        # Set encoding
+        if response.encoding == 'ISO-8859-1':
+            response.encoding = 'utf-8'
+        
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        print(f"Response encoding: {response.encoding}")
+        print(f"Response status: {response.status_code}")
+        print(f"Content length: {len(response.text)}")
+        
+        # Look for title-related elements
+        print("\n--- Title Elements ---")
+        title_elements = soup.find_all(['h1', 'title', 'yt-formatted-string'])
+        for i, elem in enumerate(title_elements[:10]):  # Show first 10
+            print(f"{i+1}. Tag: {elem.name}, Class: {elem.get('class', 'None')}, Text: {elem.get_text()[:100]}...")
+        
+        # Look for ytd-watch-metadata
+        print("\n--- ytd-watch-metadata Elements ---")
+        metadata_elements = soup.find_all('ytd-watch-metadata')
+        for i, elem in enumerate(metadata_elements):
+            print(f"{i+1}. ytd-watch-metadata found: {elem}")
+        
+        # Look for channel/author elements
+        print("\n--- Channel/Author Elements ---")
+        channel_elements = soup.find_all(['a', 'yt-formatted-string'], class_=lambda x: x and any(word in str(x).lower() for word in ['channel', 'owner', 'author']))
+        for i, elem in enumerate(channel_elements[:5]):
+            print(f"{i+1}. Tag: {elem.name}, Class: {elem.get('class', 'None')}, Text: {elem.get_text()[:50]}...")
+        
+        # Check for JSON data in script tags
+        print("\n--- Script Tags with JSON ---")
+        script_tags = soup.find_all('script')
+        for i, script in enumerate(script_tags):
+            if script.string and ('title' in script.string or 'author' in script.string):
+                print(f"{i+1}. Script tag with title/author data found (length: {len(script.string)})")
+                # Look for specific patterns
+                if '"title"' in script.string:
+                    print("   Contains 'title' pattern")
+                if '"author"' in script.string:
+                    print("   Contains 'author' pattern")
+        
+    except Exception as e:
+        print(f"Debug error: {e}")
 
 def test_youtube_extractor():
     """Test the YouTube extractor with various YouTube URLs"""
@@ -82,6 +143,9 @@ def test_invalid_url():
 
 if __name__ == "__main__":
     print("Testing YouTube Metadata Extractor\n")
+    
+    # Debug the page structure first
+    debug_youtube_structure()
     
     # Test valid YouTube URLs
     test_youtube_extractor()
